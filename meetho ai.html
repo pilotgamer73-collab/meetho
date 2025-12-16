@@ -1,0 +1,3693 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FreshCart - Grocery Delivery</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Maps API -->
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCq9ftuNQgj2rejrUVrxIA90xoDsS49LCw&libraries=places&callback=initMap" async defer></script>
+    <style>
+        /* ===== RESET & BASE STYLES ===== */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        // ===== GEOLOCATION & REVERSE GEOCODING =====
+        function requestLocation() {
+            const btn = document.getElementById('useLocationBtn');
+            if (!navigator.geolocation) {
+                showNotification('Geolocation is not supported by your device/browser.', 'error');
+                return;
+            }
+            try {
+                if (btn) { btn.disabled = true; btn.innerHTML = '<span class="loading"></span> Locating...'; }
+                navigator.geolocation.getCurrentPosition(function(position) {
+                    const latLng = { lat: position.coords.latitude, lng: position.coords.longitude };
+                    if (!map) initCheckoutMap();
+                    map.setCenter(latLng);
+                    map.setZoom(17);
+                    if (!checkoutMarker) {
+                        checkoutMarker = new google.maps.Marker({ position: latLng, map: map, draggable: true, title: 'Delivery location' });
+                        google.maps.event.addListener(checkoutMarker, 'dragend', function(event) { updateAddressFromMap(event.latLng); });
+                    } else {
+                        checkoutMarker.setPosition(latLng);
+                    }
+                    // Reverse geocode to fill street/landmark
+                    updateAddressFromMap(new google.maps.LatLng(latLng.lat, latLng.lng));
+                    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-location-arrow"></i> Use my current location'; }
+                    showNotification('Location detected. Street and landmark populated. Please enter your door number.', 'success');
+                }, function(error) {
+                    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-location-arrow"></i> Use my current location'; }
+                    handleLocationError(error);
+                }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+            } catch (e) {
+                if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-location-arrow"></i> Use my current location'; }
+                showNotification('Failed to get location. Please enter address manually.', 'error');
+            }
+        }
+
+        function handleLocationError(error) {
+            let msg = 'Unable to retrieve location. Please ensure location services are enabled.';
+            if (error && error.code === 1) msg = 'Location permission denied. Please allow location access.';
+            else if (error && error.code === 2) msg = 'Location unavailable. Try again or enter address manually.';
+            else if (error && error.code === 3) msg = 'Location request timed out. Try again.';
+            showNotification(msg, 'error');
+        }
+
+        :root {
+            --primary-color: #FF6B6B;
+            --secondary-color: #4ECDC4;
+            --accent-color: #FFD166;
+            --dark-color: #2D3047;
+            --light-color: #F7F7F7;
+            --success-color: #06D6A0;
+            --warning-color: #FFD166;
+            --danger-color: #EF476F;
+            --text-dark: #333333;
+            --text-light: #666666;
+            --shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            --radius: 10px;
+            --transition: all 0.3s ease;
+        }
+
+        body {
+            font-family: 'Poppins', sans-serif;
+            background-color: var(--light-color);
+            color: var(--text-dark);
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        /* ===== TYPOGRAPHY ===== */
+        h1, h2, h3, h4 {
+            font-weight: 600;
+            margin-bottom: 1rem;
+        }
+
+        h1 { font-size: 2.5rem; }
+        h2 { font-size: 2rem; }
+        h3 { font-size: 1.5rem; }
+        p { margin-bottom: 1rem; }
+
+        /* ===== BUTTONS ===== */
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: var(--radius);
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: var(--transition);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background-color: var(--primary-color);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background-color: #ff5252;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(255, 107, 107, 0.3);
+        }
+
+        .btn-secondary {
+            background-color: var(--secondary-color);
+            color: white;
+        }
+
+        .btn-success {
+            background-color: var(--success-color);
+            color: white;
+        }
+
+        .btn-warning {
+            background-color: var(--warning-color);
+            color: var(--text-dark);
+        }
+
+        .btn-danger {
+            background-color: var(--danger-color);
+            color: white;
+        }
+
+        .btn-outline {
+            background-color: transparent;
+            border: 2px solid var(--primary-color);
+            color: var(--primary-color);
+        }
+
+        .btn-outline:hover {
+            background-color: var(--primary-color);
+            color: white;
+        }
+
+        .btn-sm {
+            padding: 8px 16px;
+            font-size: 14px;
+        }
+
+        .btn-accent {
+            background-color: var(--accent-color);
+            color: var(--text-dark);
+        }
+
+        /* ===== HEADER & NAVBAR ===== */
+        .header {
+            background: white;
+            box-shadow: var(--shadow);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        .navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 0;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+        }
+
+        .logo-icon {
+            color: var(--primary-color);
+            font-size: 2rem;
+        }
+
+        .logo-text {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: var(--dark-color);
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 30px;
+            align-items: center;
+        }
+
+        .nav-link {
+            text-decoration: none;
+            color: var(--text-dark);
+            font-weight: 500;
+            transition: var(--transition);
+            padding: 8px 12px;
+            border-radius: var(--radius);
+            cursor: pointer;
+        }
+
+        .nav-link:hover, .nav-link.active {
+            background-color: rgba(255, 107, 107, 0.1);
+            color: var(--primary-color);
+        }
+
+        .cart-icon {
+            position: relative;
+            cursor: pointer;
+            padding: 8px;
+        }
+
+        .cart-count {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            background-color: var(--primary-color);
+            color: white;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .user-welcome {
+            font-weight: 500;
+            color: var(--text-dark);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* ===== MAIN CONTENT AREA ===== */
+        .main-content {
+            min-height: calc(100vh - 280px);
+            padding: 30px 0;
+        }
+
+        /* ===== LOGIN SECTION ===== */
+        .login-section {
+            max-width: 500px;
+            margin: 50px auto;
+            background: white;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            padding: 40px;
+        }
+
+        .login-tabs {
+            display: flex;
+            margin-bottom: 30px;
+            border-bottom: 2px solid #eee;
+        }
+
+        .login-tab {
+            flex: 1;
+            text-align: center;
+            padding: 15px;
+            background: none;
+            border: none;
+            font-size: 18px;
+            font-weight: 500;
+            color: var(--text-light);
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .login-tab.active {
+            color: var(--primary-color);
+            border-bottom: 3px solid var(--primary-color);
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #ddd;
+            border-radius: var(--radius);
+            font-size: 16px;
+            transition: var(--transition);
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.1);
+        }
+
+        /* ===== HOMEPAGE ===== */
+        .hero-section {
+            background: linear-gradient(135deg, rgba(255, 107, 107, 0.9), rgba(78, 205, 196, 0.9)), url('https://images.unsplash.com/photo-1542838132-92c53300491e?ixlib=rb-4.0.3');
+            background-size: cover;
+            background-position: center;
+            color: white;
+            padding: 80px 0;
+            border-radius: var(--radius);
+            margin-bottom: 40px;
+            text-align: center;
+        }
+
+        .hero-title {
+            font-size: 3rem;
+            margin-bottom: 20px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .hero-subtitle {
+            font-size: 1.2rem;
+            margin-bottom: 30px;
+            opacity: 0.9;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .search-box {
+            max-width: 600px;
+            margin: 0 auto;
+            display: flex;
+            background: white;
+            border-radius: 50px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .search-input {
+            flex: 1;
+            padding: 15px 25px;
+            border: none;
+            font-size: 16px;
+            outline: none;
+        }
+
+        .search-btn {
+            background: var(--dark-color);
+            color: white;
+            border: none;
+            padding: 0 30px;
+            cursor: pointer;
+            font-size: 18px;
+            transition: var(--transition);
+        }
+
+        .search-btn:hover {
+            background: #1a1c2e;
+        }
+
+        /* ===== CATEGORIES ===== */
+        .categories-section {
+            margin-bottom: 40px;
+        }
+
+        .section-title {
+            font-size: 1.8rem;
+            margin-bottom: 25px;
+            color: var(--dark-color);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .section-title i {
+            color: var(--primary-color);
+        }
+
+        .categories-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 20px;
+        }
+
+        .category-card {
+            background: white;
+            border-radius: var(--radius);
+            padding: 25px 15px;
+            text-align: center;
+            box-shadow: var(--shadow);
+            cursor: pointer;
+            transition: var(--transition);
+            border: 2px solid transparent;
+        }
+
+        .category-card:hover, .category-card.active {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+            border-color: var(--primary-color);
+        }
+
+        .category-icon {
+            font-size: 2.5rem;
+            color: var(--primary-color);
+            margin-bottom: 15px;
+            background: rgba(255, 107, 107, 0.1);
+            width: 70px;
+            height: 70px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            margin: 0 auto 15px;
+        }
+
+        /* ===== PRODUCTS ===== */
+        .products-section {
+            margin-bottom: 40px;
+        }
+
+        .products-filter {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            overflow-x: auto;
+            padding-bottom: 10px;
+        }
+
+        .filter-btn {
+            padding: 10px 25px;
+            background: white;
+            border: 2px solid #ddd;
+            border-radius: 25px;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: var(--transition);
+            font-weight: 500;
+        }
+
+        .filter-btn.active {
+            background: var(--primary-color);
+            color: white;
+            border-color: var(--primary-color);
+        }
+
+        .products-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 30px;
+        }
+
+        .product-card {
+            background: white;
+            border-radius: var(--radius);
+            overflow: hidden;
+            box-shadow: var(--shadow);
+            transition: var(--transition);
+            position: relative;
+        }
+
+        .product-card:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 15px 30px rgba(0,0,0,0.15);
+        }
+
+        .product-badge {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            background: var(--primary-color);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            z-index: 1;
+        }
+
+        .product-image {
+            height: 200px;
+            background: linear-gradient(135deg, #f8f8f8, #f0f0f0);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 4rem;
+            color: #ddd;
+        }
+
+        .product-info {
+            padding: 25px;
+        }
+
+        .product-name {
+            font-size: 1.3rem;
+            margin-bottom: 10px;
+            color: var(--dark-color);
+        }
+
+        .product-price {
+            color: var(--primary-color);
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 15px;
+        }
+
+        .product-unit {
+            color: var(--text-light);
+            font-size: 0.9rem;
+            margin-bottom: 20px;
+        }
+
+        .product-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .quantity-control {
+            display: flex;
+            align-items: center;
+            border: 2px solid #ddd;
+            border-radius: var(--radius);
+            overflow: hidden;
+            background: #f8f8f8;
+        }
+
+        .quantity-btn {
+            background: #f8f8f8;
+            border: none;
+            width: 45px;
+            height: 45px;
+            cursor: pointer;
+            font-size: 1.2rem;
+            transition: var(--transition);
+        }
+
+        .quantity-btn:hover {
+            background: #e8e8e8;
+        }
+
+        .quantity-input {
+            width: 60px;
+            border: none;
+            text-align: center;
+            font-size: 1.1rem;
+            font-weight: 600;
+            background: white;
+        }
+
+        /* ===== CART SIDEBAR ===== */
+        .cart-sidebar {
+            position: fixed;
+            top: 0;
+            right: -450px;
+            width: 450px;
+            height: 100vh;
+            background: white;
+            box-shadow: -5px 0 25px rgba(0,0,0,0.1);
+            transition: var(--transition);
+            z-index: 1001;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .cart-sidebar.active {
+            right: 0;
+        }
+
+        .cart-header {
+            padding: 25px;
+            border-bottom: 2px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--dark-color);
+            color: white;
+        }
+
+        .cart-items {
+            flex: 1;
+            overflow-y: auto;
+            padding: 25px;
+        }
+
+        .cart-item {
+            display: flex;
+            gap: 20px;
+            padding: 20px 0;
+            border-bottom: 1px solid #eee;
+            align-items: center;
+        }
+
+        .cart-item:last-child {
+            border-bottom: none;
+        }
+
+        .cart-item-img {
+            width: 90px;
+            height: 90px;
+            background: #f8f8f8;
+            border-radius: var(--radius);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            color: var(--primary-color);
+        }
+
+        .cart-item-details {
+            flex: 1;
+        }
+
+        .cart-item-name {
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--dark-color);
+        }
+
+        .cart-item-price {
+            color: var(--primary-color);
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+
+        .cart-item-unit {
+            color: var(--text-light);
+            font-size: 0.9rem;
+        }
+
+        .cart-footer {
+            padding: 25px;
+            border-top: 2px solid #eee;
+            background: #f8f8f8;
+        }
+
+        .cart-total {
+            display: flex;
+            justify-content: space-between;
+            font-size: 1.6rem;
+            font-weight: 700;
+            margin-bottom: 25px;
+            color: var(--dark-color);
+        }
+
+        .cart-total span:last-child {
+            color: var(--primary-color);
+        }
+
+        .overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transition: var(--transition);
+        }
+
+        .overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        /* ===== CHECKOUT ===== */
+        .checkout-section {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            padding: 40px;
+        }
+
+        .checkout-steps {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 40px;
+            position: relative;
+        }
+
+        .checkout-steps::before {
+            content: '';
+            position: absolute;
+            top: 20px;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: #eee;
+            z-index: 1;
+        }
+
+        .step {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+            z-index: 2;
+            background: white;
+            padding: 0 10px;
+        }
+
+        .step-number {
+            width: 45px;
+            height: 45px;
+            border-radius: 50%;
+            background: #eee;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            margin-bottom: 10px;
+            transition: var(--transition);
+            border: 3px solid white;
+        }
+
+        .step.active .step-number {
+            background: var(--primary-color);
+            color: white;
+            transform: scale(1.1);
+        }
+
+        .step-label {
+            font-weight: 500;
+            color: var(--text-light);
+        }
+
+        .step.active .step-label {
+            color: var(--primary-color);
+            font-weight: 600;
+        }
+
+        .address-section {
+            margin-bottom: 30px;
+        }
+
+        .map-container {
+            height: 300px;
+            background: #f8f8f8;
+            border-radius: var(--radius);
+            margin-bottom: 25px;
+            border: 2px solid #eee;
+        }
+
+        #map, #trackingMap {
+            width: 100%;
+            height: 100%;
+            border-radius: var(--radius);
+        }
+
+        .payment-options {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .payment-option {
+            padding: 25px;
+            border: 2px solid #ddd;
+            border-radius: var(--radius);
+            text-align: center;
+            cursor: pointer;
+            transition: var(--transition);
+            background: #f8f8f8;
+        }
+
+        .payment-option:hover {
+            transform: translateY(-5px);
+            box-shadow: var(--shadow);
+        }
+
+        .payment-option.active {
+            border-color: var(--primary-color);
+            background: rgba(255, 107, 107, 0.1);
+            box-shadow: 0 5px 15px rgba(255, 107, 107, 0.2);
+        }
+
+        .payment-icon {
+            font-size: 2.5rem;
+            margin-bottom: 15px;
+            color: var(--primary-color);
+        }
+
+        /* ===== ADMIN PANEL ===== */
+        .admin-panel {
+            display: none;
+        }
+
+        .admin-header {
+            background: linear-gradient(135deg, var(--dark-color), #1a1c2e);
+            color: white;
+            padding: 20px 0;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        .admin-nav {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .admin-section {
+            background: white;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            padding: 30px;
+            margin-bottom: 30px;
+        }
+
+        .products-management {
+            display: grid;
+            grid-template-columns: 320px 1fr;
+            gap: 30px;
+        }
+
+        .products-list {
+            max-height: 600px;
+            overflow-y: auto;
+            border: 2px solid #eee;
+            border-radius: var(--radius);
+            padding: 15px;
+        }
+
+        .product-list-item {
+            padding: 20px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+            transition: var(--transition);
+            border-radius: var(--radius);
+            margin-bottom: 10px;
+        }
+
+        .product-list-item:hover {
+            background: #f8f8f8;
+            transform: translateX(5px);
+        }
+
+        .product-list-item.active {
+            background: rgba(255, 107, 107, 0.1);
+            border-left: 4px solid var(--primary-color);
+            box-shadow: 0 4px 12px rgba(255, 107, 107, 0.1);
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .file-upload {
+            border: 2px dashed #ddd;
+            border-radius: var(--radius);
+            padding: 50px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: var(--transition);
+            background: #f8f8f8;
+        }
+
+        .file-upload:hover {
+            border-color: var(--primary-color);
+            background: rgba(255, 107, 107, 0.05);
+        }
+
+        .upload-icon {
+            font-size: 3.5rem;
+            color: #ddd;
+            margin-bottom: 20px;
+        }
+
+        /* ===== ORDERS MANAGEMENT ===== */
+        .orders-table-container {
+            overflow-x: auto;
+            border-radius: var(--radius);
+            border: 2px solid #eee;
+        }
+
+        .orders-table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 800px;
+        }
+
+        .orders-table th {
+            background: var(--dark-color);
+            color: white;
+            padding: 18px;
+            text-align: left;
+            font-weight: 600;
+            border: none;
+        }
+
+        .orders-table td {
+            padding: 18px;
+            border-bottom: 1px solid #eee;
+            vertical-align: top;
+        }
+
+        .orders-table tr:hover {
+            background: #f8f8f8;
+        }
+
+        .status-badge {
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .status-pending {
+            background: rgba(255, 166, 0, 0.1);
+            color: #ffa600;
+        }
+
+        .status-processing {
+            background: rgba(78, 205, 196, 0.1);
+            color: var(--secondary-color);
+        }
+
+        .status-completed {
+            background: rgba(6, 214, 160, 0.1);
+            color: var(--success-color);
+        }
+
+        .status-delivered {
+            background: rgba(255, 107, 107, 0.1);
+            color: var(--primary-color);
+        }
+
+        .payment-status {
+            padding: 6px 12px;
+            border-radius: 15px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .payment-pending {
+            background: rgba(239, 71, 111, 0.1);
+            color: var(--danger-color);
+        }
+
+        .payment-completed {
+            background: rgba(6, 214, 160, 0.1);
+            color: var(--success-color);
+        }
+
+        .customer-info {
+            background: #f8f8f8;
+            padding: 20px;
+            border-radius: var(--radius);
+            margin-top: 20px;
+            border-left: 4px solid var(--primary-color);
+        }
+
+        .customer-info h4 {
+            color: var(--dark-color);
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .customer-details {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+
+        .customer-detail {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--text-dark);
+        }
+
+        .customer-detail i {
+            color: var(--primary-color);
+            width: 20px;
+        }
+
+        /* ===== OFFERS PAGE ===== */
+        .offers-section {
+            margin-bottom: 40px;
+        }
+
+        .offers-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 30px;
+        }
+
+        .offer-card {
+            background: white;
+            border-radius: var(--radius);
+            overflow: hidden;
+            box-shadow: var(--shadow);
+            transition: var(--transition);
+            border: 2px solid transparent;
+        }
+
+        .offer-card:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 15px 30px rgba(0,0,0,0.15);
+            border-color: var(--primary-color);
+        }
+
+        .offer-banner {
+            height: 160px;
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 2.2rem;
+            font-weight: 700;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .offer-details {
+            padding: 25px;
+        }
+
+        /* ===== ORDER CONFIRMATION ===== */
+        .order-confirmation {
+            text-align: center;
+            padding: 60px 40px;
+            background: white;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            max-width: 700px;
+            margin: 50px auto;
+            border-top: 5px solid var(--primary-color);
+        }
+
+        .confirmation-icon {
+            font-size: 6rem;
+            color: var(--success-color);
+            margin-bottom: 25px;
+            animation: bounce 1s infinite alternate;
+        }
+
+        @keyframes bounce {
+            from { transform: translateY(0); }
+            to { transform: translateY(-20px); }
+        }
+
+        .timer {
+            font-size: 3.5rem;
+            color: var(--primary-color);
+            font-weight: 800;
+            margin: 25px 0;
+            font-family: 'Roboto', monospace;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .tracking-map {
+            height: 300px;
+            background: #f8f8f8;
+            border-radius: var(--radius);
+            margin: 30px 0;
+            border: 2px solid #eee;
+        }
+
+        .order-details {
+            background: #f8f8f8;
+            padding: 25px;
+            border-radius: var(--radius);
+            margin: 30px 0;
+            text-align: left;
+        }
+
+        /* ===== FOOTER ===== */
+        .footer {
+            background: linear-gradient(135deg, var(--dark-color), #1a1c2e);
+            color: white;
+            padding: 60px 0 20px;
+            margin-top: 60px;
+        }
+
+        .footer-content {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 40px;
+            margin-bottom: 40px;
+        }
+
+        .footer-section h3 {
+            color: white;
+            margin-bottom: 25px;
+            font-size: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .footer-section h3 i {
+            color: var(--primary-color);
+        }
+
+        .footer-links {
+            list-style: none;
+        }
+
+        .footer-links li {
+            margin-bottom: 12px;
+        }
+
+        .footer-links a {
+            color: #ddd;
+            text-decoration: none;
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .footer-links a:hover {
+            color: var(--primary-color);
+            transform: translateX(5px);
+        }
+
+        .contact-info {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .contact-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: #ddd;
+        }
+
+        .contact-item i {
+            color: var(--primary-color);
+            width: 20px;
+        }
+
+        .copyright {
+            text-align: center;
+            padding-top: 30px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            color: #aaa;
+            font-size: 0.9rem;
+        }
+
+        /* ===== RESPONSIVE DESIGN ===== */
+        @media (max-width: 1200px) {
+            .products-management {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 992px) {
+            .cart-sidebar {
+                width: 90%;
+                right: -90%;
+            }
+            
+            .products-grid {
+                grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            }
+        }
+
+        @media (max-width: 768px) {
+            .navbar {
+                flex-direction: column;
+                gap: 20px;
+                padding: 20px 0;
+            }
+            
+            .nav-links {
+                width: 100%;
+                justify-content: center;
+                flex-wrap: wrap;
+            }
+            
+            .hero-title {
+                font-size: 2.2rem;
+            }
+            
+            .hero-subtitle {
+                font-size: 1.1rem;
+            }
+            
+            .checkout-section, .login-section, .admin-section {
+                padding: 25px;
+            }
+            
+            .products-grid {
+                grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            }
+        }
+
+        @media (max-width: 576px) {
+            .hero-title {
+                font-size: 1.8rem;
+            }
+            
+            .hero-section {
+                padding: 50px 20px;
+            }
+            
+            .search-box {
+                flex-direction: column;
+                border-radius: var(--radius);
+            }
+            
+            .search-input {
+                border-radius: var(--radius) var(--radius) 0 0;
+            }
+            
+            .search-btn {
+                border-radius: 0 0 var(--radius) var(--radius);
+                padding: 15px;
+            }
+            
+            .categories-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            
+            .products-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .checkout-steps {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 25px;
+            }
+            
+            .checkout-steps::before {
+                display: none;
+            }
+            
+            .step {
+                flex-direction: row;
+                gap: 15px;
+                width: 100%;
+            }
+            
+            .step-number {
+                margin-bottom: 0;
+            }
+            
+            .payment-options {
+                grid-template-columns: 1fr;
+            }
+            
+            .cart-sidebar {
+                width: 100%;
+                right: -100%;
+            }
+            
+            .order-confirmation {
+                padding: 40px 20px;
+                margin: 30px 20px;
+            }
+        }
+
+        /* ===== LOADING & NOTIFICATION ===== */
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid var(--primary-color);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 25px;
+            background: var(--success-color);
+            color: white;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transform: translateX(150%);
+            transition: transform 0.3s ease;
+        }
+
+        .notification.show {
+            transform: translateX(0);
+        }
+
+        .notification.error {
+            background: var(--danger-color);
+        }
+
+        .notification.warning {
+            background: var(--warning-color);
+            color: var(--text-dark);
+        }
+
+        .notification.info {
+            background: var(--secondary-color);
+        }
+    </style>
+</head>
+<body>
+    <!-- Header & Navigation -->
+    <header class="header">
+        <div class="container">
+            <nav class="navbar">
+                <div class="logo" onclick="showSection('home')">
+                    <i class="fas fa-shopping-basket logo-icon"></i>
+                    <span class="logo-text">FreshCart</span>
+                </div>
+                <div class="nav-links" id="navLinks">
+                    <a href="#home" class="nav-link active" onclick="showSection('home')">
+                        <i class="fas fa-home"></i> Home
+                    </a>
+                    <a href="#offers" class="nav-link" onclick="showSection('offers')">
+                        <i class="fas fa-tag"></i> Offers
+                    </a>
+                    <a href="#myOrders" class="nav-link" onclick="showSection('myOrders')">
+                        <i class="fas fa-list"></i> My Orders
+                    </a>
+                    <div class="cart-icon" onclick="toggleCart()">
+                        <i class="fas fa-shopping-cart"></i>
+                        <span class="cart-count" id="cartCount">0</span>
+                    </div>
+                    <div class="user-welcome" id="userWelcome"></div>
+                    <button class="btn btn-outline btn-sm" onclick="logout()">
+                        <i class="fas fa-sign-out-alt"></i> Logout
+                    </button>
+                </div>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Login Section -->
+    <section class="main-content" id="loginSection">
+        <div class="login-section">
+            <div class="login-tabs">
+                <button class="login-tab active" onclick="switchLoginTab('customer')">Customer Login</button>
+                <button class="login-tab" onclick="switchLoginTab('admin')">Admin Login</button>
+            </div>
+
+            <!-- Service Areas Management -->
+            <div class="admin-section hidden" id="adminServiceAreas">
+                <h2><i class="fas fa-map-marked-alt"></i> Service Areas — Delivery only in Nandyal City</h2>
+                <p style="color:var(--text-light);">Manage pincodes allowed for delivery. Allowed pincodes should be within Nandyal city.</p>
+
+                <div style="display:flex;gap:20px;align-items:center;margin-top:20px;">
+                    <input type="text" id="newPincode" class="form-control" placeholder="Enter pincode (e.g. 518502)" style="max-width:240px;" />
+                    <button class="btn btn-primary" onclick="addPincode()">Add Pincode</button>
+                    <div style="color:var(--text-light);">Allowed examples: 518501, 518502</div>
+                </div>
+
+                <div style="margin-top:20px;">
+                    <h4>Allowed Pincodes</h4>
+                    <div id="allowedPincodesList" style="margin-top:12px;"></div>
+                </div>
+            </div>
+            
+            <!-- Customer Login -->
+            <div id="customerLogin">
+                <h2>Welcome to FreshCart</h2>
+                <p>Login to order fresh groceries delivered in 30 minutes</p>
+                <form id="customerLoginForm" onsubmit="customerLogin(event)">
+                    <div class="form-group">
+                        <label class="form-label">Email Address</label>
+                        <input type="email" class="form-control" placeholder="Enter your email" required id="customerEmail">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Password</label>
+                        <input type="password" class="form-control" placeholder="Enter your password" required id="customerPassword">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Phone Number</label>
+                        <input type="tel" class="form-control" placeholder="Enter your phone number" required id="customerPhone">
+                    </div>
+                    <button type="submit" class="btn btn-primary" style="width: 100%;">
+                        <i class="fas fa-sign-in-alt"></i> Login
+                    </button>
+                </form>
+                <p style="text-align: center; margin-top: 20px; color: var(--text-light);">
+                    <i class="fas fa-info-circle"></i> Demo: Use any email, password and phone
+                </p>
+            </div>
+            
+            <!-- Admin Login -->
+            <div id="adminLogin" class="hidden">
+                <h2>Admin Panel</h2>
+                <p>Login to manage products, orders, and customers</p>
+                <form id="adminLoginForm" onsubmit="adminLogin(event)">
+                    <div class="form-group">
+                        <label class="form-label">Admin ID</label>
+                        <input type="text" class="form-control" placeholder="Enter admin ID" value="admin" required id="adminId">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Password</label>
+                        <input type="password" class="form-control" placeholder="Enter admin password" value="admin123" required id="adminPassword">
+                    </div>
+                    <button type="submit" class="btn btn-primary" style="width: 100%;">
+                        <i class="fas fa-lock"></i> Admin Login
+                    </button>
+                </form>
+                <p style="text-align: center; margin-top: 20px; color: var(--text-light);">
+                    <i class="fas fa-key"></i> Default: admin / admin123
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Homepage -->
+    <section class="main-content hidden" id="homeSection">
+        <div class="hero-section">
+            <h1 class="hero-title">Fresh Groceries Delivered in 30 Minutes</h1>
+            <p class="hero-subtitle">Get daily vegetables, fruits, groceries, and spices delivered fresh to your doorstep with our express delivery service</p>
+            <div class="search-box">
+                <input type="text" class="search-input" placeholder="Search for vegetables, fruits, groceries..." id="searchInput">
+                <button class="search-btn" onclick="searchProducts()">
+                    <i class="fas fa-search"></i> Search
+                </button>
+            </div>
+        </div>
+
+        <!-- Categories -->
+        <section class="categories-section">
+            <div class="container">
+                <h2 class="section-title"><i class="fas fa-th-large"></i> Shop by Category</h2>
+                <div class="categories-grid">
+                    <div class="category-card active" onclick="filterProducts('all')">
+                        <div class="category-icon"><i class="fas fa-box"></i></div>
+                        <h4>All Products</h4>
+                    </div>
+                    <div class="category-card" onclick="filterProducts('vegetables')">
+                        <div class="category-icon"><i class="fas fa-carrot"></i></div>
+                        <h4>Vegetables</h4>
+                    </div>
+                    <div class="category-card" onclick="filterProducts('fruits')">
+                        <div class="category-icon"><i class="fas fa-apple-alt"></i></div>
+                        <h4>Fruits</h4>
+                    </div>
+                    <div class="category-card" onclick="filterProducts('groceries')">
+                        <div class="category-icon"><i class="fas fa-shopping-basket"></i></div>
+                        <h4>Groceries</h4>
+                    </div>
+                    <div class="category-card" onclick="filterProducts('spices')">
+                        <div class="category-icon"><i class="fas fa-mortar-pestle"></i></div>
+                        <h4>Spices</h4>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Products -->
+        <section class="products-section">
+            <div class="container">
+                <h2 class="section-title"><i class="fas fa-store"></i> Fresh Products</h2>
+                <div class="products-filter">
+                    <button class="filter-btn active" onclick="filterProducts('all')">All Products</button>
+                    <button class="filter-btn" onclick="filterProducts('vegetables')">Vegetables</button>
+                    <button class="filter-btn" onclick="filterProducts('fruits')">Fruits</button>
+                    <button class="filter-btn" onclick="filterProducts('groceries')">Groceries</button>
+                    <button class="filter-btn" onclick="filterProducts('spices')">Spices</button>
+                </div>
+                <div class="products-grid" id="productsGrid">
+                    <!-- Products will be loaded here -->
+                </div>
+            </div>
+        </section>
+    </section>
+
+    <!-- Offers Page -->
+    <section class="main-content hidden" id="offersSection">
+        <div class="container">
+            <h1 class="section-title"><i class="fas fa-gift"></i> Special Offers & Discounts</h1>
+            <div class="offers-grid" id="offersGrid">
+                <!-- Offers will be loaded here -->
+            </div>
+        </div>
+    </section>
+
+    <!-- Checkout Section -->
+    <section class="main-content hidden" id="checkoutSection">
+        <div class="checkout-section">
+            <div class="checkout-steps">
+                <div class="step active" id="step1">
+                    <div class="step-number">1</div>
+                    <div class="step-label">Address</div>
+                </div>
+                <div class="step" id="step2">
+                    <div class="step-number">2</div>
+                    <div class="step-label">Payment</div>
+                </div>
+                <div class="step" id="step3">
+                    <div class="step-number">3</div>
+                    <div class="step-label">Confirm</div>
+                </div>
+            </div>
+
+            <!-- Address Step -->
+            <div class="address-step" id="addressStep">
+                <h2><i class="fas fa-map-marker-alt"></i> Delivery Address</h2>
+                <p>Enter your delivery address or select from Google Maps</p>
+                
+                <div class="map-container">
+                    <div id="map"></div>
+                </div>
+
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:15px;">
+                    <button class="btn btn-outline" id="useLocationBtn" onclick="requestLocation()">
+                        <i class="fas fa-location-arrow"></i> Use my current location
+                    </button>
+                    <span style="color:var(--text-light);font-size:0.95rem;">Allow location access to auto-fill street and landmark (you only need to enter door number).</span>
+                </div>
+
+                <div id="savedAddressesContainer" style="margin-bottom:12px;">
+                    <h4 style="margin-bottom:8px;">Saved Addresses</h4>
+                    <div id="savedAddressesList" style="display:flex;flex-direction:column;gap:8px;"></div>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label"><i class="fas fa-home"></i> Door Number *</label>
+                    <input type="text" class="form-control" id="doorNumber" placeholder="Enter door number" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label"><i class="fas fa-map-pin"></i> Pincode *</label>
+                    <input type="text" class="form-control" id="pincode" placeholder="Enter pincode" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label"><i class="fas fa-road"></i> Street *</label>
+                    <input type="text" class="form-control" id="street" placeholder="Enter street name" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label"><i class="fas fa-landmark"></i> Landmark *</label>
+                    <input type="text" class="form-control" id="landmark" placeholder="Enter nearby landmark" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label"><i class="fas fa-phone"></i> Contact Phone</label>
+                    <input type="tel" class="form-control" id="contactPhone" placeholder="Enter contact phone number" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label"><i class="fas fa-info-circle"></i> Delivery Instructions (Optional)</label>
+                    <textarea class="form-control" id="deliveryInstructions" placeholder="Any special delivery instructions" rows="3"></textarea>
+                </div>
+
+                <div style="display:flex;gap:12px;align-items:center;margin-top:8px;">
+                    <input type="checkbox" id="saveAddressCheckbox" />
+                    <label for="saveAddressCheckbox">Save this address for future orders</label>
+                    <input type="text" id="addressLabel" class="form-control" placeholder="Label (Home, Office)" style="max-width:220px; margin-left:8px;" />
+                    <button class="btn btn-outline" onclick="saveAddressFromForm()">Save Address</button>
+                </div>
+                
+                <div style="display: flex; gap: 15px; margin-top: 30px;">
+                    <button class="btn btn-outline" onclick="toggleCart()">
+                        <i class="fas fa-arrow-left"></i> Back to Cart
+                    </button>
+                    <button class="btn btn-primary" onclick="nextStep(2)" style="flex: 1;">
+                        Continue to Payment <i class="fas fa-arrow-right"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Payment Step -->
+            <div class="payment-step hidden" id="paymentStep">
+                <h2><i class="fas fa-mobile-alt"></i> UPI Payment</h2>
+                <p>Pay quickly and securely using UPI</p>
+
+                <div class="payment-options">
+                    <div class="payment-option active" data-method="upi" onclick="selectPayment('upi', this)">
+                        <i class="fas fa-mobile-alt payment-icon"></i>
+                        <h4>UPI</h4>
+                        <p>Pay using UPI apps</p>
+                    </div>
+                </div>
+
+                <div id="upiDetails" class="payment-details">
+                    <div class="form-group">
+                        <label class="form-label">UPI ID</label>
+                        <input type="text" class="form-control" id="upiId" placeholder="username@upi">
+                    </div>
+                </div>
+                
+                <div style="display: flex; gap: 15px; margin-top: 30px;">
+                    <button class="btn btn-secondary" onclick="prevStep(1)">
+                        <i class="fas fa-arrow-left"></i> Back
+                    </button>
+                    <button class="btn btn-primary" onclick="processPayment()" style="flex: 1;">
+                        Complete Payment <i class="fas fa-check"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Confirmation Step -->
+            <div class="confirmation-step hidden" id="confirmationStep">
+                <div class="order-confirmation">
+                    <i class="fas fa-check-circle confirmation-icon"></i>
+                    <h2>Order Confirmed Successfully!</h2>
+                    <p>Thank you for your order. Your items will be delivered shortly.</p>
+                    
+                    <div class="order-details">
+                        <h4><i class="fas fa-receipt"></i> Order Details</h4>
+                        <p><strong>Order ID:</strong> <span id="orderIdDisplay"></span></p>
+                        <p><strong>Delivery Address:</strong> <span id="deliveryAddress"></span></p>
+                        <p><strong>Payment Method:</strong> <span id="paymentMethodDisplay"></span></p>
+                        <p><strong>Payment Status:</strong> <span class="payment-status payment-completed">Completed</span></p>
+                    </div>
+                    
+                    <div class="timer" id="orderTimer">30:00</div>
+                    <p>Expected delivery in <strong>30 minutes</strong></p>
+                    
+                    <div class="tracking-map">
+                        <div id="trackingMap"></div>
+                    </div>
+                    
+                    <p>Your order is being prepared and will be delivered to:</p>
+                    <p id="deliveryAddressText" style="font-weight: 600; margin: 15px 0;"></p>
+                    
+                    <div style="display: flex; gap: 15px; margin-top: 30px;">
+                        <button class="btn btn-outline" onclick="downloadInvoice()">
+                            <i class="fas fa-download"></i> Download Invoice
+                        </button>
+                        <button class="btn btn-primary" onclick="showSection('home')">
+                            <i class="fas fa-home"></i> Continue Shopping
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- My Orders (Customer) -->
+    <section class="main-content hidden" id="myOrdersSection">
+        <div class="container">
+            <h2><i class="fas fa-list"></i> My Orders</h2>
+            <p>View your previous and recent orders, check status and estimated delivery time.</p>
+
+            <div class="admin-section" id="customerOrders">
+                <div id="customerOrdersList">
+                    <!-- Customer orders will be rendered here -->
+                </div>
+            </div>
+
+            <div class="customer-info hidden" id="customerOrderDetails">
+                <h4><i class="fas fa-info-circle"></i> Order Details - <span id="custDetailOrderId"></span></h4>
+                <div id="custOrderDetailsContent"></div>
+                <div style="margin-top:16px;">
+                    <button class="btn btn-outline" onclick="document.getElementById('customerOrderDetails').classList.add('hidden')">
+                        <i class="fas fa-times"></i> Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Admin Panel -->
+    <section class="main-content hidden" id="adminPanel">
+        <div class="admin-header">
+            <div class="container">
+                <div class="navbar">
+                    <div class="logo" onclick="showAdminSection('dashboard')">
+                        <i class="fas fa-cogs logo-icon"></i>
+                        <span class="logo-text">Admin Panel</span>
+                    </div>
+                    <div class="admin-nav">
+                        <button class="btn btn-accent" onclick="showAdminSection('dashboard')">
+                            <i class="fas fa-tachometer-alt"></i> Dashboard
+                        </button>
+                        <button class="btn btn-accent" onclick="showAdminSection('products')">
+                            <i class="fas fa-box"></i> Products
+                        </button>
+                        <button class="btn btn-accent" onclick="showAdminSection('orders')">
+                            <i class="fas fa-clipboard-list"></i> Orders
+                        </button>
+                        <button class="btn btn-accent" onclick="showAdminSection('customers')">
+                            <i class="fas fa-users"></i> Customers
+                        </button>
+                        <button class="btn btn-accent" onclick="showAdminSection('serviceAreas')">
+                            <i class="fas fa-map-marker-alt"></i> Service Areas
+                        </button>
+                        <button class="btn btn-outline btn-sm" onclick="logout()">
+                            <i class="fas fa-sign-out-alt"></i> Logout
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Admin Dashboard -->
+        <div class="container">
+            <div class="admin-section" id="adminDashboard">
+                <h2><i class="fas fa-tachometer-alt"></i> Dashboard Overview</h2>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 25px; margin: 30px 0;">
+                    <div style="background: linear-gradient(135deg, var(--primary-color), #ff5252); color: white; padding: 25px; border-radius: var(--radius); box-shadow: var(--shadow);">
+                        <h3 style="color: white;">Total Orders</h3>
+                        <p style="font-size: 2.5rem; font-weight: 700;" id="totalOrders">0</p>
+                        <p style="opacity: 0.9;"><i class="fas fa-chart-line"></i> View all orders</p>
+                    </div>
+                    <div style="background: linear-gradient(135deg, var(--secondary-color), #3bb4a8); color: white; padding: 25px; border-radius: var(--radius); box-shadow: var(--shadow);">
+                        <h3 style="color: white;">Total Products</h3>
+                        <p style="font-size: 2.5rem; font-weight: 700;" id="totalProducts">0</p>
+                        <p style="opacity: 0.9;"><i class="fas fa-box"></i> Manage products</p>
+                    </div>
+                    <div style="background: linear-gradient(135deg, var(--success-color), #05c095); color: white; padding: 25px; border-radius: var(--radius); box-shadow: var(--shadow);">
+                        <h3 style="color: white;">Revenue</h3>
+                        <p style="font-size: 2.5rem; font-weight: 700;" id="totalRevenue">₹0</p>
+                        <p style="opacity: 0.9;"><i class="fas fa-rupee-sign"></i> This month</p>
+                    </div>
+                    <div style="background: linear-gradient(135deg, var(--warning-color), #ffc233); color: var(--text-dark); padding: 25px; border-radius: var(--radius); box-shadow: var(--shadow);">
+                        <h3>Pending Orders</h3>
+                        <p style="font-size: 2.5rem; font-weight: 700;" id="pendingOrders">0</p>
+                        <p style="opacity: 0.8;"><i class="fas fa-clock"></i> Need action</p>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 40px;">
+                    <h3><i class="fas fa-chart-bar"></i> Recent Orders</h3>
+                    <div class="orders-table-container">
+                        <table class="orders-table">
+                            <thead>
+                                <tr>
+                                    <th>Order ID</th>
+                                    <th>Customer</th>
+                                    <th>Amount</th>
+                                    <th>Status</th>
+                                    <th>Date</th>
+                                </tr>
+                            </thead>
+                            <tbody id="recentOrdersTable">
+                                <!-- Recent orders will be loaded here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Products Management -->
+            <div class="admin-section hidden" id="adminProducts">
+                <h2><i class="fas fa-box"></i> Products Management</h2>
+                <div class="products-management">
+                    <div>
+                        <h3>Product List</h3>
+                        <div class="products-list" id="adminProductsList">
+                            <!-- Products will be listed here -->
+                        </div>
+                    </div>
+                    <div>
+                        <h3>Add/Edit Product</h3>
+                        <form id="productForm" onsubmit="saveProduct(event)">
+                            <div class="form-group">
+                                <label class="form-label">Product Name *</label>
+                                <input type="text" class="form-control" id="productName" placeholder="Enter product name" required>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label class="form-label">Category *</label>
+                                    <select class="form-control" id="productCategory" required>
+                                        <option value="">Select Category</option>
+                                        <option value="vegetables">Vegetables</option>
+                                        <option value="fruits">Fruits</option>
+                                        <option value="groceries">Groceries</option>
+                                        <option value="spices">Spices</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Price (₹) *</label>
+                                    <input type="number" class="form-control" id="productPrice" placeholder="Enter price" min="1" step="0.01" required>
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label class="form-label">Unit *</label>
+                                    <input type="text" class="form-control" id="productUnit" placeholder="kg, piece, packet, etc." required>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Stock Quantity</label>
+                                    <input type="number" class="form-control" id="productStock" placeholder="Enter stock quantity" min="0">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Description</label>
+                                <textarea class="form-control" id="productDescription" placeholder="Enter product description" rows="3"></textarea>
+                            </div>
+                            <div style="display: flex; gap: 15px; margin-top: 30px;">
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-save"></i> Save Product
+                                </button>
+                                <button type="button" class="btn btn-outline" onclick="clearProductForm()">
+                                    <i class="fas fa-times"></i> Clear
+                                </button>
+                                <button type="button" class="btn btn-danger" onclick="deleteProduct()" id="deleteBtn" style="display: none;">
+                                    <i class="fas fa-trash"></i> Delete
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Orders Management -->
+            <div class="admin-section hidden" id="adminOrders">
+                <h2><i class="fas fa-clipboard-list"></i> Orders Management</h2>
+                <div class="orders-table-container">
+                    <table class="orders-table" id="ordersTable">
+                        <thead>
+                            <tr>
+                                <th>Order ID</th>
+                                <th>Customer</th>
+                                <th>Items</th>
+                                <th>Amount</th>
+                                <th>Status</th>
+                                <th>Payment</th>
+                                <th>Date</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ordersTableBody">
+                            <!-- Orders will be listed here -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- Order Details Modal -->
+                <div class="customer-info hidden" id="orderDetails">
+                    <h4><i class="fas fa-info-circle"></i> Order Details - <span id="detailOrderId"></span></h4>
+                    <div id="orderDetailsContent"></div>
+                </div>
+            </div>
+
+            <!-- Customers Management -->
+            <div class="admin-section hidden" id="adminCustomers">
+                <h2><i class="fas fa-users"></i> Customers Management</h2>
+                <div class="orders-table-container">
+                    <table class="orders-table">
+                        <thead>
+                            <tr>
+                                <th>Customer ID</th>
+                                <th>Name</th>
+                                <th>Email</th>
+                                <th>Phone</th>
+                                <th>Total Orders</th>
+                                <th>Total Spent</th>
+                                <th>Join Date</th>
+                            </tr>
+                        </thead>
+                        <tbody id="customersTableBody">
+                            <!-- Customers will be listed here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Cart Sidebar -->
+    <div class="cart-sidebar" id="cartSidebar">
+        <div class="cart-header">
+            <h3><i class="fas fa-shopping-cart"></i> Your Cart</h3>
+            <button onclick="toggleCart()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: white;">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="cart-items" id="cartItems">
+            <!-- Cart items will be loaded here -->
+        </div>
+        <div class="cart-footer">
+            <div class="cart-total">
+                <span>Total Amount:</span>
+                <span id="cartTotal">₹0</span>
+            </div>
+            <button class="btn btn-primary" style="width: 100%; padding: 15px; font-size: 1.1rem;" onclick="proceedToCheckout()">
+                <i class="fas fa-shopping-bag"></i> Proceed to Checkout
+            </button>
+        </div>
+    </div>
+    <div class="overlay" id="overlay" onclick="toggleCart()"></div>
+
+    <!-- Notification Container -->
+    <div id="notificationContainer"></div>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h3><i class="fas fa-shopping-basket"></i> FreshCart</h3>
+                    <p>Your one-stop solution for fresh groceries and daily needs delivered within 30 minutes. Quality products, fast delivery.</p>
+                </div>
+                <div class="footer-section">
+                    <h3><i class="fas fa-link"></i> Quick Links</h3>
+                    <ul class="footer-links">
+                        <li><a href="#" onclick="showSection('home')"><i class="fas fa-home"></i> Home</a></li>
+                        <li><a href="#" onclick="showSection('offers')"><i class="fas fa-tag"></i> Offers</a></li>
+                        <li><a href="#privacy"><i class="fas fa-shield-alt"></i> Privacy Policy</a></li>
+                        <li><a href="#terms"><i class="fas fa-file-contract"></i> Terms & Conditions</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h3><i class="fas fa-phone"></i> Contact Info</h3>
+                    <div class="contact-info">
+                        <div class="contact-item">
+                            <i class="fas fa-map-marker-alt"></i>
+                            <span>123 Fresh Street, City, Country</span>
+                        </div>
+                        <div class="contact-item">
+                            <i class="fas fa-phone"></i>
+                            <span>+91 9876543210</span>
+                        </div>
+                        <div class="contact-item">
+                            <i class="fas fa-envelope"></i>
+                            <span>support@freshcart.com</span>
+                        </div>
+                        <div class="contact-item">
+                            <i class="fas fa-clock"></i>
+                            <span>24/7 Customer Support</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="footer-section">
+                    <h3><i class="fas fa-download"></i> Download App</h3>
+                    <p>Get the FreshCart app for faster ordering and exclusive offers.</p>
+                    <div style="display: flex; gap: 10px; margin-top: 15px;">
+                        <button class="btn btn-primary btn-sm">
+                            <i class="fab fa-google-play"></i> Google Play
+                        </button>
+                        <button class="btn btn-primary btn-sm">
+                            <i class="fab fa-app-store"></i> App Store
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="copyright">
+                <p>&copy; 2023 FreshCart. All rights reserved. | Designed with <i class="fas fa-heart" style="color: var(--primary-color);"></i></p>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // ===== GLOBAL VARIABLES =====
+        let currentUser = null;
+        let cart = JSON.parse(localStorage.getItem('freshCart_cart')) || [];
+        let products = [];
+        let orders = JSON.parse(localStorage.getItem('freshCart_orders')) || [];
+        let customers = JSON.parse(localStorage.getItem('freshCart_customers')) || [];
+        let selectedPayment = 'upi';
+        let orderTimer;
+        let map;
+        let checkoutMarker;
+        let geocoder;
+        let trackingMap;
+        let editingProductId = null;
+
+        // ===== PRODUCT DATA =====
+        const productData = [
+            // Vegetables
+            { id: 1, name: "Tomato", category: "vegetables", price: 40, unit: "kg", stock: 50, description: "Fresh red tomatoes" },
+            { id: 2, name: "Potato", category: "vegetables", price: 30, unit: "kg", stock: 100, description: "Fresh potatoes" },
+            { id: 3, name: "Onion", category: "vegetables", price: 35, unit: "kg", stock: 80, description: "Fresh onions" },
+            { id: 4, name: "Green Chilli", category: "vegetables", price: 20, unit: "100g", stock: 200, description: "Spicy green chillies" },
+            { id: 5, name: "Brinjal (Eggplant)", category: "vegetables", price: 45, unit: "kg", stock: 40, description: "Fresh brinjals" },
+            { id: 6, name: "Lady Finger (Okra)", category: "vegetables", price: 50, unit: "kg", stock: 60, description: "Fresh lady fingers" },
+            { id: 7, name: "Cabbage", category: "vegetables", price: 25, unit: "piece", stock: 30, description: "Fresh cabbage" },
+            { id: 8, name: "Cauliflower", category: "vegetables", price: 40, unit: "piece", stock: 25, description: "Fresh cauliflower" },
+            { id: 9, name: "Carrot", category: "vegetables", price: 60, unit: "kg", stock: 45, description: "Fresh carrots" },
+            { id: 10, name: "Beetroot", category: "vegetables", price: 50, unit: "kg", stock: 35, description: "Fresh beetroots" },
+            // Fruits
+            { id: 11, name: "Banana", category: "fruits", price: 50, unit: "dozen", stock: 60, description: "Fresh bananas" },
+            { id: 12, name: "Apple", category: "fruits", price: 180, unit: "kg", stock: 40, description: "Fresh apples" },
+            { id: 13, name: "Orange", category: "fruits", price: 120, unit: "kg", stock: 50, description: "Fresh oranges" },
+            { id: 14, name: "Sweet Lime (Mosambi)", category: "fruits", price: 100, unit: "kg", stock: 45, description: "Fresh sweet limes" },
+            { id: 15, name: "Papaya", category: "fruits", price: 40, unit: "kg", stock: 30, description: "Fresh papaya" },
+            // Groceries
+            { id: 16, name: "Rice", category: "groceries", price: 1200, unit: "5kg", stock: 50, description: "Premium quality rice" },
+            { id: 17, name: "Wheat Flour (Atta)", category: "groceries", price: 400, unit: "5kg", stock: 60, description: "Fresh wheat flour" },
+            { id: 18, name: "Toor Dal", category: "groceries", price: 180, unit: "1kg", stock: 80, description: "Premium toor dal" },
+            { id: 19, name: "Moong Dal", category: "groceries", price: 150, unit: "1kg", stock: 90, description: "Premium moong dal" },
+            { id: 20, name: "Sugar", category: "groceries", price: 45, unit: "1kg", stock: 100, description: "Fine sugar" },
+            // Spices
+            { id: 21, name: "Red Chilli Powder", category: "spices", price: 150, unit: "500g", stock: 60, description: "Spicy red chilli powder" },
+            { id: 22, name: "Turmeric Powder", category: "spices", price: 120, unit: "500g", stock: 70, description: "Pure turmeric powder" },
+            { id: 23, name: "Coriander Powder", category: "spices", price: 130, unit: "500g", stock: 65, description: "Fresh coriander powder" },
+            { id: 24, name: "Garam Masala", category: "spices", price: 200, unit: "500g", stock: 50, description: "Premium garam masala" },
+            { id: 25, name: "Cumin Seeds", category: "spices", price: 250, unit: "500g", stock: 40, description: "Premium cumin seeds" },
+        ];
+
+        // ===== INITIALIZATION =====
+        document.addEventListener('DOMContentLoaded', function() {
+            // Load data from localStorage or initialize
+            products = JSON.parse(localStorage.getItem('freshCart_products')) || [...productData];
+            orders = JSON.parse(localStorage.getItem('freshCart_orders')) || [];
+            customers = JSON.parse(localStorage.getItem('freshCart_customers')) || [];
+            
+            // Initialize localStorage if empty
+            if (!localStorage.getItem('freshCart_products')) {
+                localStorage.setItem('freshCart_products', JSON.stringify(products));
+            }
+            if (!localStorage.getItem('freshCart_orders')) {
+                localStorage.setItem('freshCart_orders', JSON.stringify(orders));
+            }
+            if (!localStorage.getItem('freshCart_customers')) {
+                localStorage.setItem('freshCart_customers', JSON.stringify(customers));
+            }
+            
+            // Check if user is already logged in
+            checkLoginStatus();
+            
+            // Load initial data
+            loadProducts();
+            updateCartCount();
+            loadOffers();
+            loadAdminProducts();
+            loadOrders();
+            loadCustomerOrders();
+            updateAdminStats();
+            renderAllowedPincodes();
+            loadCustomers();
+            
+            // Initialize categories
+            document.querySelectorAll('.category-card').forEach(card => {
+                card.addEventListener('click', function() {
+                    document.querySelectorAll('.category-card').forEach(c => c.classList.remove('active'));
+                    this.classList.add('active');
+                });
+            });
+        });
+
+        // ===== LOGIN FUNCTIONS =====
+        function switchLoginTab(tab) {
+            document.querySelectorAll('.login-tab').forEach(t => t.classList.remove('active'));
+            document.getElementById('customerLogin').classList.add('hidden');
+            document.getElementById('adminLogin').classList.add('hidden');
+            
+            if (tab === 'customer') {
+                document.querySelector('.login-tab:nth-child(1)').classList.add('active');
+                document.getElementById('customerLogin').classList.remove('hidden');
+            } else {
+                document.querySelector('.login-tab:nth-child(2)').classList.add('active');
+                document.getElementById('adminLogin').classList.remove('hidden');
+            }
+        }
+
+        function customerLogin(event) {
+            event.preventDefault();
+            const email = document.getElementById('customerEmail').value;
+            const phone = document.getElementById('customerPhone').value;
+            const name = email.split('@')[0];
+            
+            // Create or update customer
+            let customer = customers.find(c => c.email === email);
+            if (!customer) {
+                customer = {
+                    id: 'CUST' + Date.now().toString().slice(-6),
+                    name: name,
+                    email: email,
+                    phone: phone,
+                    joinDate: new Date().toISOString(),
+                    totalOrders: 0,
+                    totalSpent: 0
+                };
+                customers.push(customer);
+                localStorage.setItem('freshCart_customers', JSON.stringify(customers));
+            }
+            
+            currentUser = {
+                type: 'customer',
+                id: customer.id,
+                email: email,
+                phone: phone,
+                name: name
+            };
+            
+            localStorage.setItem('freshCart_currentUser', JSON.stringify(currentUser));
+            showNotification('Login successful! Welcome to FreshCart', 'success');
+            showSection('home');
+            updateUserWelcome();
+        }
+
+        function adminLogin(event) {
+            event.preventDefault();
+            const adminId = document.getElementById('adminId').value;
+            const password = document.getElementById('adminPassword').value;
+            
+            if (adminId === 'admin' && password === 'admin123') {
+                currentUser = {
+                    type: 'admin',
+                    id: adminId,
+                    name: 'Admin'
+                };
+                localStorage.setItem('freshCart_currentUser', JSON.stringify(currentUser));
+                showNotification('Admin login successful!', 'success');
+                showSection('adminPanel');
+                showAdminSection('dashboard');
+                updateUserWelcome();
+                // Load orders and show admin notifications for pending/recent orders
+                loadOrders();
+                showAdminNotifications();
+            } else {
+                showNotification('Invalid admin credentials!', 'error');
+            }
+        }
+
+        function checkLoginStatus() {
+            const savedUser = localStorage.getItem('freshCart_currentUser');
+            if (savedUser) {
+                currentUser = JSON.parse(savedUser);
+                if (currentUser.type === 'admin') {
+                    showSection('adminPanel');
+                    showAdminSection('dashboard');
+                } else {
+                    showSection('home');
+                }
+                updateUserWelcome();
+                return true;
+            }
+            return false;
+        }
+
+        function updateUserWelcome() {
+            const userWelcome = document.getElementById('userWelcome');
+            if (userWelcome && currentUser) {
+                userWelcome.innerHTML = `<i class="fas fa-user"></i> Welcome, ${currentUser.name}`;
+            }
+        }
+
+        function logout() {
+            currentUser = null;
+            localStorage.removeItem('freshCart_currentUser');
+            showNotification('Logged out successfully', 'info');
+            showSection('loginSection');
+            document.getElementById('userWelcome').innerHTML = '';
+        }
+
+        // ===== SECTION MANAGEMENT =====
+        function showSection(sectionId) {
+            // Require login for non-login sections
+            if (sectionId !== 'loginSection' && !currentUser) {
+                showSection('loginSection');
+                return;
+            }
+
+            // Hide all main-content sections
+            document.querySelectorAll('.main-content').forEach(s => s.classList.add('hidden'));
+
+            // Support both plain ids (e.g. 'adminPanel') and shorthand (e.g. 'home')
+            let target = document.getElementById(sectionId) || document.getElementById(sectionId + 'Section');
+            if (!target) {
+                // If nothing matches, fall back to login
+                target = document.getElementById('loginSection');
+            }
+            target.classList.remove('hidden');
+
+            // Update nav links (match by href fragment if present)
+            document.querySelectorAll('.nav-link').forEach(link => link.classList.remove('active'));
+            const hrefMatch = document.querySelector(`.nav-link[href="#${sectionId}"]`);
+            if (hrefMatch) hrefMatch.classList.add('active');
+
+            // If showing home, reset category active state
+            if (target.id === 'homeSection' || target.id === 'home') {
+                const cards = document.querySelectorAll('.category-card');
+                cards.forEach(card => card.classList.remove('active'));
+                if (cards[0]) cards[0].classList.add('active');
+            }
+        }
+
+        function showAdminSection(sectionId) {
+            if (!currentUser || currentUser.type !== 'admin') {
+                showNotification('Access denied. Admin login required.', 'error');
+                showSection('loginSection');
+                return;
+            }
+            
+            document.querySelectorAll('.admin-section').forEach(s => s.classList.add('hidden'));
+            const section = document.getElementById('admin' + sectionId.charAt(0).toUpperCase() + sectionId.slice(1));
+            if (section) {
+                section.classList.remove('hidden');
+            }
+            
+            // Load data for the section
+            if (sectionId === 'orders') {
+                loadOrders();
+            } else if (sectionId === 'customers') {
+                loadCustomers();
+            } else if (sectionId === 'serviceAreas') {
+                renderAllowedPincodes();
+            }
+        }
+
+        // ===== PRODUCT FUNCTIONS =====
+        function loadProducts(filter = 'all') {
+            const container = document.getElementById('productsGrid');
+            if (!container) return;
+            
+            const filteredProducts = filter === 'all' 
+                ? products 
+                : products.filter(p => p.category === filter);
+            
+            container.innerHTML = filteredProducts.map(product => `
+                <div class="product-card">
+                    ${product.stock < 10 ? '<div class="product-badge">Low Stock</div>' : ''}
+                    <div class="product-image">
+                        <i class="fas ${getProductIcon(product.category)}"></i>
+                    </div>
+                    <div class="product-info">
+                        <h3 class="product-name">${product.name}</h3>
+                        <div class="product-unit">${product.description}</div>
+                        <div class="product-price">₹${product.price}</div>
+                        <div class="product-unit">per ${product.unit} | Stock: ${product.stock}</div>
+                        <div class="product-actions">
+                            <div class="quantity-control">
+                                <button class="quantity-btn" onclick="updateQuantity(${product.id}, -1)">-</button>
+                                <input type="text" class="quantity-input" id="qty-${product.id}" value="${getCartQuantity(product.id)}" readonly>
+                                <button class="quantity-btn" onclick="updateQuantity(${product.id}, 1)">+</button>
+                            </div>
+                            <button class="btn btn-primary" onclick="addToCart(${product.id})" ${product.stock === 0 ? 'disabled' : ''}>
+                                <i class="fas fa-cart-plus"></i> ${product.stock === 0 ? 'Out of Stock' : 'Add'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+            
+            // Update filter buttons
+            document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                if (btn.textContent.toLowerCase().includes(filter) || (filter === 'all' && btn.textContent === 'All Products')) {
+                    btn.classList.add('active');
+                }
+            });
+        }
+
+        function filterProducts(category) {
+            loadProducts(category);
+        }
+
+        function searchProducts() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            if (!searchTerm) {
+                loadProducts();
+                return;
+            }
+            
+            const filteredProducts = products.filter(p => 
+                p.name.toLowerCase().includes(searchTerm) || 
+                p.description.toLowerCase().includes(searchTerm) ||
+                p.category.toLowerCase().includes(searchTerm)
+            );
+            
+            const container = document.getElementById('productsGrid');
+            if (!container) return;
+            
+            container.innerHTML = filteredProducts.map(product => `
+                <div class="product-card">
+                    ${product.stock < 10 ? '<div class="product-badge">Low Stock</div>' : ''}
+                    <div class="product-image">
+                        <i class="fas ${getProductIcon(product.category)}"></i>
+                    </div>
+                    <div class="product-info">
+                        <h3 class="product-name">${product.name}</h3>
+                        <div class="product-unit">${product.description}</div>
+                        <div class="product-price">₹${product.price}</div>
+                        <div class="product-unit">per ${product.unit}</div>
+                        <div class="product-actions">
+                            <div class="quantity-control">
+                                <button class="quantity-btn" onclick="updateQuantity(${product.id}, -1)">-</button>
+                                <input type="text" class="quantity-input" id="qty-${product.id}" value="${getCartQuantity(product.id)}" readonly>
+                                <button class="quantity-btn" onclick="updateQuantity(${product.id}, 1)">+</button>
+                            </div>
+                            <button class="btn btn-primary" onclick="addToCart(${product.id})" ${product.stock === 0 ? 'disabled' : ''}>
+                                <i class="fas fa-cart-plus"></i> ${product.stock === 0 ? 'Out of Stock' : 'Add'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function getProductIcon(category) {
+            switch(category) {
+                case 'vegetables': return 'fa-carrot';
+                case 'fruits': return 'fa-apple-alt';
+                case 'groceries': return 'fa-shopping-basket';
+                case 'spices': return 'fa-mortar-pestle';
+                default: return 'fa-box';
+            }
+        }
+
+        // ===== CART FUNCTIONS =====
+        function getCartQuantity(productId) {
+            const item = cart.find(item => item.id === productId);
+            return item ? item.quantity : 0;
+        }
+
+        function updateQuantity(productId, change) {
+            const input = document.getElementById(`qty-${productId}`);
+            let newQty = parseInt(input.value) + change;
+            if (newQty < 0) newQty = 0;
+            
+            const product = products.find(p => p.id === productId);
+            if (newQty > product.stock) {
+                showNotification(`Only ${product.stock} items available in stock`, 'warning');
+                newQty = product.stock;
+            }
+            
+            input.value = newQty;
+            
+            if (newQty === 0) {
+                cart = cart.filter(item => item.id !== productId);
+            } else {
+                const item = cart.find(item => item.id === productId);
+                if (item) {
+                    item.quantity = newQty;
+                } else {
+                    cart.push({...product, quantity: newQty});
+                }
+            }
+            
+            updateCart();
+        }
+
+        function addToCart(productId) {
+            const product = products.find(p => p.id === productId);
+            if (product.stock === 0) {
+                showNotification('Product is out of stock', 'warning');
+                return;
+            }
+            
+            updateQuantity(productId, 1);
+            showNotification(`${product.name} added to cart!`, 'success');
+        }
+
+        function updateCart() {
+            localStorage.setItem('freshCart_cart', JSON.stringify(cart));
+            updateCartCount();
+            updateCartDisplay();
+        }
+
+        function updateCartCount() {
+            const count = cart.reduce((total, item) => total + item.quantity, 0);
+            document.getElementById('cartCount').textContent = count;
+        }
+
+        function updateCartDisplay() {
+            const container = document.getElementById('cartItems');
+            if (!container) return;
+            
+            if (cart.length === 0) {
+                container.innerHTML = `
+                    <div style="text-align: center; padding: 40px 20px;">
+                        <i class="fas fa-shopping-cart" style="font-size: 4rem; color: #ddd; margin-bottom: 20px;"></i>
+                        <p style="font-size: 1.2rem; color: var(--text-light); margin-bottom: 10px;">Your cart is empty</p>
+                        <p style="color: var(--text-light);">Add some fresh products to get started!</p>
+                    </div>
+                `;
+                document.getElementById('cartTotal').textContent = '₹0';
+                return;
+            }
+            
+            const total = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+            
+            container.innerHTML = cart.map(item => `
+                <div class="cart-item">
+                    <div class="cart-item-img">
+                        <i class="fas ${getProductIcon(item.category)}"></i>
+                    </div>
+                    <div class="cart-item-details">
+                        <div class="cart-item-name">${item.name}</div>
+                        <div class="cart-item-price">₹${item.price} per ${item.unit}</div>
+                        <div class="cart-item-unit">Total: ₹${item.price * item.quantity}</div>
+                        <div class="quantity-control" style="width: 140px; margin-top: 10px;">
+                            <button class="quantity-btn" onclick="updateCartItemQuantity(${item.id}, -1)">-</button>
+                            <input type="text" class="quantity-input" value="${item.quantity}" readonly>
+                            <button class="quantity-btn" onclick="updateCartItemQuantity(${item.id}, 1)">+</button>
+                        </div>
+                    </div>
+                    <button class="btn btn-danger btn-sm" onclick="removeFromCart(${item.id})" style="align-self: flex-start;">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            `).join('');
+            
+            document.getElementById('cartTotal').textContent = `₹${total.toFixed(2)}`;
+        }
+
+        function updateCartItemQuantity(productId, change) {
+            const item = cart.find(item => item.id === productId);
+            if (item) {
+                const product = products.find(p => p.id === productId);
+                const newQty = item.quantity + change;
+                
+                if (newQty < 1) {
+                    removeFromCart(productId);
+                    return;
+                }
+                
+                if (newQty > product.stock) {
+                    showNotification(`Only ${product.stock} items available in stock`, 'warning');
+                    return;
+                }
+                
+                item.quantity = newQty;
+                updateCart();
+                
+                // Update the quantity on product card
+                const input = document.getElementById(`qty-${productId}`);
+                if (input) {
+                    input.value = newQty;
+                }
+            }
+        }
+
+        function removeFromCart(productId) {
+            cart = cart.filter(item => item.id !== productId);
+            updateCart();
+            
+            // Update the quantity on product card
+            const input = document.getElementById(`qty-${productId}`);
+            if (input) {
+                input.value = 0;
+            }
+            
+            showNotification('Item removed from cart', 'info');
+        }
+
+        function toggleCart() {
+            updateCartDisplay();
+            document.getElementById('cartSidebar').classList.toggle('active');
+            document.getElementById('overlay').classList.toggle('active');
+        }
+
+        function proceedToCheckout() {
+            if (cart.length === 0) {
+                showNotification('Your cart is empty!', 'warning');
+                return;
+            }
+            
+            // Check stock availability
+            for (const item of cart) {
+                const product = products.find(p => p.id === item.id);
+                if (product.stock < item.quantity) {
+                    showNotification(`Only ${product.stock} ${product.name} available in stock`, 'error');
+                    return;
+                }
+            }
+            
+            toggleCart();
+            showSection('checkout');
+            // Reset checkout steps
+            document.querySelectorAll('.step').forEach((step, index) => {
+                step.classList.toggle('active', index === 0);
+            });
+            document.getElementById('addressStep').classList.remove('hidden');
+            document.getElementById('paymentStep').classList.add('hidden');
+            document.getElementById('confirmationStep').classList.add('hidden');
+            
+            // Initialize map for address selection
+            initCheckoutMap();
+        }
+
+        // ===== CHECKOUT FUNCTIONS =====
+        function initCheckoutMap() {
+            if (!map) {
+                map = new google.maps.Map(document.getElementById('map'), {
+                    center: { lat: 17.3850, lng: 78.4867 }, // Hyderabad coordinates
+                    zoom: 12,
+                    mapTypeControl: true,
+                    streetViewControl: true,
+                    fullscreenControl: true
+                });
+                // Initialize geocoder
+                geocoder = new google.maps.Geocoder();
+
+                // Add marker (checkoutMarker is global so other functions can update it)
+                checkoutMarker = new google.maps.Marker({
+                    position: { lat: 17.3850, lng: 78.4867 },
+                    map: map,
+                    draggable: true,
+                    title: "Drag to select location"
+                });
+
+                // Add click listener to map
+                google.maps.event.addListener(map, 'click', function(event) {
+                    checkoutMarker.setPosition(event.latLng);
+                    updateAddressFromMap(event.latLng);
+                });
+
+                // Add marker drag listener
+                google.maps.event.addListener(checkoutMarker, 'dragend', function(event) {
+                    updateAddressFromMap(event.latLng);
+                });
+            }
+
+            // Load saved addresses for logged-in customer
+            loadSavedAddresses();
+            }
+        }
+
+        function updateAddressFromMap(latLng) {
+            // Use global geocoder if available
+            const g = geocoder || new google.maps.Geocoder();
+            if (!geocoder) geocoder = g;
+            g.geocode({ 'location': latLng }, function(results, status) {
+                if (status === 'OK') {
+                    if (results[0]) {
+                        const address = results[0].formatted_address;
+                        // Parse address components
+                        const addressParts = address.split(',');
+                        if (addressParts.length > 0) {
+                            // Fill street and landmark; leave door number for the user
+                            document.getElementById('street').value = addressParts[0] || '';
+                            if (addressParts.length > 1) {
+                                document.getElementById('landmark').value = addressParts[1] || '';
+                            }
+                        }
+                        showNotification('Location selected from map', 'info');
+                    }
+                }
+            });
+        }
+
+        function nextStep(step) {
+            if (step === 2) {
+                // Validate address
+                const doorNumber = document.getElementById('doorNumber').value.trim();
+                const street = document.getElementById('street').value.trim();
+                const landmark = document.getElementById('landmark').value.trim();
+                const pincode = document.getElementById('pincode') ? document.getElementById('pincode').value.trim() : '';
+                const contactPhone = document.getElementById('contactPhone').value.trim();
+                
+                if (!doorNumber || !street || !landmark || !contactPhone) {
+                    showNotification('Please fill all required fields', 'error');
+                    return;
+                }
+                if (!pincode || !/^[0-9]{6}$/.test(pincode)) {
+                    showNotification('Please enter a valid 6-digit pincode', 'error');
+                    return;
+                }
+
+                // enforce allowed pincodes
+                const allowed = loadAllowedPincodes();
+                if (!allowed.includes(pincode)) {
+                    showNotification('Delivery only in Nandyal City (518501, 518502)', 'error');
+                    return;
+                }
+                
+                if (!/^\d{10}$/.test(contactPhone.replace(/\D/g, ''))) {
+                    showNotification('Please enter a valid 10-digit phone number', 'error');
+                    return;
+                }
+            }
+            
+            document.querySelectorAll('.step').forEach((s, index) => {
+                s.classList.toggle('active', index < step);
+            });
+            
+            if (step === 2) {
+                document.getElementById('addressStep').classList.add('hidden');
+                document.getElementById('paymentStep').classList.remove('hidden');
+                showPaymentDetails();
+            }
+        }
+
+        function prevStep(step) {
+            document.querySelectorAll('.step').forEach((s, index) => {
+                s.classList.toggle('active', index < step);
+            });
+            
+            if (step === 1) {
+                document.getElementById('paymentStep').classList.add('hidden');
+                document.getElementById('addressStep').classList.remove('hidden');
+            }
+        }
+
+        function selectPayment(method, el) {
+            selectedPayment = method;
+            document.querySelectorAll('.payment-option').forEach(opt => opt.classList.remove('active'));
+            if (el) el.classList.add('active');
+            showPaymentDetails();
+        }
+
+        function showPaymentDetails() {
+            document.querySelectorAll('.payment-details').forEach(detail => detail.classList.add('hidden'));
+            // Only UPI is supported now
+            document.getElementById('upiDetails').classList.remove('hidden');
+        }
+
+        function processPayment() {
+            // Validate UPI only
+            const upiId = document.getElementById('upiId').value;
+            if (!upiId || !upiId.includes('@')) {
+                showNotification('Please enter valid UPI ID', 'error');
+                return;
+            }
+            
+            // Process payment (simulated)
+            showNotification('Processing payment...', 'info');
+            
+            setTimeout(() => {
+                // Show confirmation
+                document.getElementById('paymentStep').classList.add('hidden');
+                document.getElementById('confirmationStep').classList.remove('hidden');
+                document.querySelectorAll('.step').forEach((s, index) => {
+                    s.classList.toggle('active', index <= 2);
+                });
+                
+                // Generate order details
+                const orderId = 'FRC' + Date.now().toString().slice(-8);
+                const address = `${document.getElementById('doorNumber').value}, ${document.getElementById('street').value}, ${document.getElementById('landmark').value}, ${document.getElementById('pincode').value}`;
+                const contactPhone = document.getElementById('contactPhone').value;
+                const deliveryInstructions = document.getElementById('deliveryInstructions').value;
+                const totalAmount = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+                
+                // Update display
+                document.getElementById('orderIdDisplay').textContent = orderId;
+                document.getElementById('deliveryAddress').textContent = address;
+                document.getElementById('paymentMethodDisplay').textContent = selectedPayment.toUpperCase();
+                document.getElementById('deliveryAddressText').textContent = address;
+                
+                // Create order
+                const order = {
+                    id: orderId,
+                    customer: {
+                        id: currentUser.id,
+                        name: currentUser.name,
+                        email: currentUser.email,
+                        phone: contactPhone
+                    },
+                    items: cart.map(item => ({
+                        id: item.id,
+                        name: item.name,
+                        price: item.price,
+                        quantity: item.quantity,
+                        unit: item.unit,
+                        total: item.price * item.quantity
+                    })),
+                    total: totalAmount,
+                    address: address,
+                    pincode: document.getElementById('pincode').value || '',
+                    contactPhone: contactPhone,
+                    deliveryInstructions: deliveryInstructions,
+                    paymentMethod: selectedPayment,
+                    paymentStatus: 'completed',
+                    orderStatus: 'pending',
+                    orderDate: new Date().toISOString(),
+                    deliveryDate: new Date(Date.now() + 30 * 60000).toISOString() // 30 minutes from now
+                };
+                
+                // Update stock
+                cart.forEach(cartItem => {
+                    const product = products.find(p => p.id === cartItem.id);
+                    if (product) {
+                        product.stock -= cartItem.quantity;
+                    }
+                });
+                
+                // Save products to localStorage
+                localStorage.setItem('freshCart_products', JSON.stringify(products));
+                
+                // Save order
+                orders.unshift(order);
+                localStorage.setItem('freshCart_orders', JSON.stringify(orders));
+                
+                // Update customer stats
+                const customer = customers.find(c => c.id === currentUser.id);
+                if (customer) {
+                    customer.totalOrders = (customer.totalOrders || 0) + 1;
+                    customer.totalSpent = (customer.totalSpent || 0) + totalAmount;
+                    localStorage.setItem('freshCart_customers', JSON.stringify(customers));
+                }
+                
+                // Clear cart
+                cart = [];
+                updateCart();
+                
+                // Start timer
+                startOrderTimer();
+                
+                // Initialize tracking map
+                initTrackingMap();
+                
+                // Update admin stats
+                updateAdminStats();
+                
+                // Show success message
+                showNotification('Payment successful! Order confirmed.', 'success');
+                
+                // Notify admin (popup + persistent admin notification)
+                notifyAdminOrder(order);
+                
+            }, 2000);
+        }
+
+        function startOrderTimer() {
+            let timeLeft = 30 * 60; // 30 minutes in seconds
+            const timerElement = document.getElementById('orderTimer');
+            
+            clearInterval(orderTimer);
+            orderTimer = setInterval(() => {
+                timeLeft--;
+                const minutes = Math.floor(timeLeft / 60);
+                const seconds = timeLeft % 60;
+                timerElement.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                
+                if (timeLeft <= 0) {
+                    clearInterval(orderTimer);
+                    timerElement.textContent = '00:00';
+                    timerElement.style.color = 'var(--success-color)';
+                    showNotification('Order delivered! Thank you for shopping with us.', 'success');
+                } else if (timeLeft <= 5 * 60) {
+                    timerElement.style.color = 'var(--warning-color)';
+                }
+            }, 1000);
+        }
+
+        function initTrackingMap() {
+            if (!trackingMap) {
+                trackingMap = new google.maps.Map(document.getElementById('trackingMap'), {
+                    center: { lat: 17.3850, lng: 78.4867 },
+                    zoom: 12,
+                    mapTypeControl: false,
+                    streetViewControl: false,
+                    fullscreenControl: false
+                });
+                
+                // Add store location
+                const storeLocation = new google.maps.Marker({
+                    position: { lat: 17.3850, lng: 78.4867 },
+                    map: trackingMap,
+                    title: "FreshCart Store",
+                    icon: {
+                        url: "http://maps.google.com/mapfiles/ms/icons/blue-dot.png"
+                    }
+                });
+                
+                // Add delivery location (simulated)
+                const deliveryLocation = new google.maps.Marker({
+                    position: { lat: 17.4250, lng: 78.4867 },
+                    map: trackingMap,
+                    title: "Delivery Location",
+                    icon: {
+                        url: "http://maps.google.com/mapfiles/ms/icons/red-dot.png"
+                    }
+                });
+                
+                // Add delivery route (simulated)
+                const deliveryPath = new google.maps.Polyline({
+                    path: [
+                        { lat: 17.3850, lng: 78.4867 },
+                        { lat: 17.4250, lng: 78.4867 }
+                    ],
+                    geodesic: true,
+                    strokeColor: '#FF6B6B',
+                    strokeOpacity: 1.0,
+                    strokeWeight: 3,
+                    map: trackingMap
+                });
+            }
+        }
+
+        function downloadInvoice() {
+            showNotification('Invoice download started', 'info');
+            // In a real app, this would generate and download a PDF invoice
+            setTimeout(() => {
+                showNotification('Invoice downloaded successfully', 'success');
+            }, 1500);
+        }
+
+        // ===== GOOGLE MAPS INITIALIZATION =====
+        function initMap() {
+            // Maps are initialized when needed (checkout and tracking)
+            console.log('Google Maps API loaded successfully');
+        }
+
+        // ===== OFFERS =====
+        function loadOffers() {
+            const offers = [
+                { title: "Weekend Special", description: "Get 30% off on all fruits this weekend", code: "FRUIT30", discount: "30% OFF", valid: "Valid till Sunday" },
+                { title: "First Order", description: "Get ₹100 off on your first order above ₹500", code: "NEW100", discount: "₹100 OFF", valid: "For new customers only" },
+                { title: "Vegetable Combo", description: "Buy 2kg vegetables and get 500g free", code: "VEGCOMBO", discount: "FREE 500g", valid: "On selected vegetables" },
+                { title: "Grocery Bonanza", description: "20% off on all groceries above ₹1000", code: "GROCERY20", discount: "20% OFF", valid: "Minimum purchase ₹1000" },
+                { title: "Spice Magic", description: "Buy 3 spice packs and get 1 free", code: "SPICE4", discount: "BUY 3 GET 1", valid: "On all spices" },
+                { title: "Quick Delivery", description: "Free delivery on orders above ₹300", code: "FREEDEL", discount: "FREE DELIVERY", valid: "Above ₹300 only" }
+            ];
+            
+            const container = document.getElementById('offersGrid');
+            if (!container) return;
+            
+            container.innerHTML = offers.map(offer => `
+                <div class="offer-card">
+                    <div class="offer-banner">${offer.discount}</div>
+                    <div class="offer-details">
+                        <h3>${offer.title}</h3>
+                        <p style="color: var(--text-light); margin-bottom: 15px;">${offer.description}</p>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px;">
+                            <div>
+                                <p style="font-weight: 600; color: var(--primary-color);">Code: ${offer.code}</p>
+                                <p style="font-size: 0.9rem; color: var(--text-light);">${offer.valid}</p>
+                            </div>
+                            <button class="btn btn-accent" onclick="applyOffer('${offer.code}')">
+                                <i class="fas fa-tag"></i> Apply
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function applyOffer(code) {
+            showNotification(`Offer ${code} applied successfully!`, 'success');
+        }
+
+        // ===== ADMIN FUNCTIONS =====
+        function loadAdminProducts() {
+            const container = document.getElementById('adminProductsList');
+            if (!container) return;
+            
+            container.innerHTML = products.map(product => `
+                <div class="product-list-item" onclick="editProduct(${product.id})" data-id="${product.id}">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <div style="font-weight: 600; color: var(--dark-color);">${product.name}</div>
+                            <div style="color: var(--text-light); font-size: 0.9rem; margin-top: 5px;">
+                                <span class="status-badge" style="background: ${getCategoryColor(product.category)}; color: white; padding: 2px 8px; border-radius: 10px; font-size: 0.8rem;">
+                                    ${product.category}
+                                </span>
+                                <span style="margin-left: 10px;">₹${product.price} per ${product.unit}</span>
+                            </div>
+                        </div>
+                        <div style="text-align: right;">
+                            <div style="font-weight: 600; color: ${product.stock < 10 ? 'var(--danger-color)' : 'var(--success-color)'}">
+                                Stock: ${product.stock}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function getCategoryColor(category) {
+            switch(category) {
+                case 'vegetables': return '#4CAF50';
+                case 'fruits': return '#FF9800';
+                case 'groceries': return '#2196F3';
+                case 'spices': return '#9C27B0';
+                default: return '#607D8B';
+            }
+        }
+
+        function editProduct(productId) {
+            const product = products.find(p => p.id === productId);
+            if (!product) return;
+            
+            editingProductId = productId;
+            
+            document.getElementById('productName').value = product.name;
+            document.getElementById('productCategory').value = product.category;
+            document.getElementById('productPrice').value = product.price;
+            document.getElementById('productUnit').value = product.unit;
+            document.getElementById('productStock').value = product.stock;
+            document.getElementById('productDescription').value = product.description || '';
+            document.getElementById('deleteBtn').style.display = 'block';
+            
+            // Highlight selected product
+            document.querySelectorAll('.product-list-item').forEach(item => item.classList.remove('active'));
+            document.querySelector(`.product-list-item[data-id="${productId}"]`).classList.add('active');
+            
+            showNotification(`Editing ${product.name}`, 'info');
+        }
+
+        function saveProduct(event) {
+            event.preventDefault();
+            
+            const product = {
+                id: editingProductId || products.length + 1,
+                name: document.getElementById('productName').value,
+                category: document.getElementById('productCategory').value,
+                price: parseFloat(document.getElementById('productPrice').value),
+                unit: document.getElementById('productUnit').value,
+                stock: parseInt(document.getElementById('productStock').value) || 0,
+                description: document.getElementById('productDescription').value
+            };
+            
+            // Check if editing existing product
+            if (editingProductId) {
+                const existingIndex = products.findIndex(p => p.id === editingProductId);
+                if (existingIndex !== -1) {
+                    products[existingIndex] = product;
+                    showNotification(`Product "${product.name}" updated successfully!`, 'success');
+                }
+            } else {
+                // Add new product
+                products.push(product);
+                showNotification(`New product "${product.name}" added successfully!`, 'success');
+            }
+            
+            // Update localStorage
+            localStorage.setItem('freshCart_products', JSON.stringify(products));
+            
+            // Refresh displays
+            loadProducts();
+            loadAdminProducts();
+            clearProductForm();
+            updateAdminStats();
+        }
+
+        function deleteProduct() {
+            if (!editingProductId) return;
+            
+            if (confirm('Are you sure you want to delete this product?')) {
+                products = products.filter(p => p.id !== editingProductId);
+                localStorage.setItem('freshCart_products', JSON.stringify(products));
+                
+                loadProducts();
+                loadAdminProducts();
+                clearProductForm();
+                updateAdminStats();
+                
+                showNotification('Product deleted successfully', 'success');
+            }
+        }
+
+        function clearProductForm() {
+            document.getElementById('productForm').reset();
+            document.getElementById('deleteBtn').style.display = 'none';
+            editingProductId = null;
+            
+            document.querySelectorAll('.product-list-item').forEach(item => item.classList.remove('active'));
+        }
+
+        // ===== ORDERS MANAGEMENT =====
+        function loadOrders() {
+            const container = document.getElementById('ordersTableBody');
+            const recentContainer = document.getElementById('recentOrdersTable');
+            
+            if (!container) return;
+            
+            if (orders.length === 0) {
+                container.innerHTML = `
+                    <tr>
+                        <td colspan="8" style="text-align: center; padding: 40px;">
+                            <i class="fas fa-clipboard-list" style="font-size: 3rem; color: #ddd; margin-bottom: 20px;"></i>
+                            <p style="color: var(--text-light);">No orders yet</p>
+                        </td>
+                    </tr>
+                `;
+                
+                if (recentContainer) {
+                    recentContainer.innerHTML = `
+                        <tr>
+                            <td colspan="5" style="text-align: center; padding: 20px; color: var(--text-light);">
+                                No recent orders
+                            </td>
+                        </tr>
+                    `;
+                }
+                return;
+            }
+            
+            // Full orders table
+            container.innerHTML = orders.map((order, index) => `
+                <tr>
+                    <td>
+                        <div style="font-weight: 600; color: var(--dark-color);">${order.id}</div>
+                        <div style="font-size: 0.85rem; color: var(--text-light);">
+                            ${new Date(order.orderDate).toLocaleDateString()}
+                        </div>
+                    </td>
+                    <td>
+                        <div style="font-weight: 600;">${order.customer.name}</div>
+                        <div style="font-size: 0.85rem; color: var(--text-light);">
+                            ${order.customer.email}
+                        </div>
+                        <div style="font-size: 0.85rem; color: var(--text-light);">
+                            <i class="fas fa-phone"></i> ${order.contactPhone}
+                        </div>
+                    </td>
+                    <td>
+                        <div style="max-width: 200px;">
+                            ${order.items.slice(0, 2).map(item => `
+                                <div style="margin-bottom: 5px;">
+                                    ${item.name} (${item.quantity}${item.unit})
+                                </div>
+                            `).join('')}
+                            ${order.items.length > 2 ? `<div style="color: var(--primary-color); font-size: 0.9rem;">+${order.items.length - 2} more items</div>` : ''}
+                        </div>
+                    </td>
+                    <td>
+                        <div style="font-weight: 700; color: var(--primary-color);">₹${order.total.toFixed(2)}</div>
+                    </td>
+                    <td>
+                        <span class="status-badge status-${order.orderStatus}">
+                            ${order.orderStatus}
+                        </span>
+                    </td>
+                    <td>
+                        <div class="payment-status payment-${order.paymentStatus}">
+                            ${order.paymentStatus}
+                        </div>
+                    </td>
+                    <td>
+                        <div style="font-size: 0.9rem;">
+                            ${new Date(order.orderDate).toLocaleDateString()}
+                        </div>
+                        <div style="font-size: 0.8rem; color: var(--text-light);">
+                            ${new Date(order.orderDate).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                        </div>
+                    </td>
+                    <td>
+                        <div style="display: flex; gap: 8px;">
+                            <button class="btn btn-primary btn-sm" onclick="viewOrderDetails(${index})" title="View Details">
+                                <i class="fas fa-eye"></i>
+                            </button>
+                            <button class="btn btn-success btn-sm" onclick="updateOrderStatus(${index}, 'delivered')" title="Mark Delivered">
+                                <i class="fas fa-check"></i>
+                            </button>
+                            <button class="btn btn-danger btn-sm" onclick="deleteOrder(${index})" title="Delete Order">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `).join('');
+            
+            // Recent orders (first 5)
+            if (recentContainer) {
+                const recentOrders = orders.slice(0, 5);
+                recentContainer.innerHTML = recentOrders.map(order => `
+                    <tr>
+                        <td>${order.id}</td>
+                        <td>${order.customer.name}</td>
+                        <td>₹${order.total.toFixed(2)}</td>
+                        <td><span class="status-badge status-${order.orderStatus}">${order.orderStatus}</span></td>
+                        <td>${new Date(order.orderDate).toLocaleDateString()}</td>
+                    </tr>
+                `).join('');
+            }
+        }
+
+        function updateOrderStatus(orderIndex, newStatus) {
+            orders[orderIndex].orderStatus = newStatus;
+            localStorage.setItem('freshCart_orders', JSON.stringify(orders));
+            loadOrders();
+            updateAdminStats();
+
+            // If order is marked delivered by admin, stop any running customer timers
+            // and update customer-facing timer/ETA UI to show delivery message.
+            const orderId = orders[orderIndex].id;
+            if (newStatus === 'delivered') {
+                try {
+                    if (window._custTimers && window._custTimers[orderId]) {
+                        clearInterval(window._custTimers[orderId]);
+                        delete window._custTimers[orderId];
+                    }
+                } catch (e) {
+                    console.warn('Error clearing customer timer', e);
+                }
+
+                const deliveredMessage = 'Your item was delivered';
+                const custTimerEl = document.getElementById(`custTimer-${orderId}`);
+                const etaEl = document.getElementById(`eta-${orderId}`);
+                if (custTimerEl) {
+                    custTimerEl.textContent = deliveredMessage;
+                    custTimerEl.style.color = 'var(--success-color)';
+                }
+                if (etaEl) {
+                    etaEl.textContent = deliveredMessage;
+                    etaEl.style.color = 'var(--success-color)';
+                }
+
+                // Refresh customer orders list so UI reflects delivered status immediately
+                loadCustomerOrders();
+            }
+
+            showNotification(`Order status updated to ${newStatus}`, 'success');
+        }
+
+        function viewOrderDetails(orderIndex) {
+            const order = orders[orderIndex];
+            const detailsDiv = document.getElementById('orderDetails');
+            const contentDiv = document.getElementById('orderDetailsContent');
+            const orderIdSpan = document.getElementById('detailOrderId');
+            
+            orderIdSpan.textContent = order.id;
+            
+            contentDiv.innerHTML = `
+                <div class="customer-details">
+                    <div class="customer-detail">
+                        <i class="fas fa-user"></i>
+                        <div>
+                            <strong>Customer:</strong> ${order.customer.name}
+                        </div>
+                    </div>
+                    <div class="customer-detail">
+                        <i class="fas fa-envelope"></i>
+                        <div>
+                            <strong>Email:</strong> ${order.customer.email}
+                        </div>
+                    </div>
+                    <div class="customer-detail">
+                        <i class="fas fa-phone"></i>
+                        <div>
+                            <strong>Phone:</strong> ${order.contactPhone}
+                        </div>
+                    </div>
+                    <div class="customer-detail">
+                        <i class="fas fa-map-marker-alt"></i>
+                        <div>
+                            <strong>Address:</strong> ${order.address}
+                        </div>
+                    </div>
+                    <div class="customer-detail">
+                        <i class="fas fa-credit-card"></i>
+                        <div>
+                            <strong>Payment:</strong> ${order.paymentMethod.toUpperCase()} 
+                            <span class="payment-status payment-${order.paymentStatus}" style="margin-left: 10px;">
+                                ${order.paymentStatus}
+                            </span>
+                        </div>
+                    </div>
+                    <div class="customer-detail">
+                        <i class="fas fa-info-circle"></i>
+                        <div>
+                            <strong>Instructions:</strong> ${order.deliveryInstructions || 'None'}
+                        </div>
+                    </div>
+                    <div class="customer-detail">
+                        <i class="fas fa-calendar"></i>
+                        <div>
+                            <strong>Order Date:</strong> ${new Date(order.orderDate).toLocaleString()}
+                        </div>
+                    </div>
+                    <div class="customer-detail">
+                        <i class="fas fa-clock"></i>
+                        <div>
+                            <strong>Delivery Expected:</strong> ${new Date(order.deliveryDate).toLocaleString()}
+                        </div>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
+                    <h5 style="margin-bottom: 15px;"><i class="fas fa-box"></i> Order Items:</h5>
+                    <div style="background: white; padding: 15px; border-radius: var(--radius);">
+                        ${order.items.map(item => `
+                            <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f0f0f0;">
+                                <div>
+                                    <strong>${item.name}</strong>
+                                    <div style="font-size: 0.9rem; color: var(--text-light);">${item.quantity}${item.unit} @ ₹${item.price}/${item.unit}</div>
+                                </div>
+                                <div style="font-weight: 600;">₹${(item.total).toFixed(2)}</div>
+                            </div>
+                        `).join('')}
+                        <div style="display: flex; justify-content: space-between; padding: 15px 0; font-size: 1.1rem; font-weight: 700;">
+                            <div>Total Amount:</div>
+                            <div style="color: var(--primary-color);">₹${order.total.toFixed(2)}</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 20px; display: flex; gap: 10px;">
+                    <button class="btn btn-primary" onclick="updateOrderStatus(${orderIndex}, 'processing')">
+                        <i class="fas fa-cogs"></i> Mark as Processing
+                    </button>
+                    <button class="btn btn-success" onclick="updateOrderStatus(${orderIndex}, 'delivered')">
+                        <i class="fas fa-check"></i> Mark as Delivered
+                    </button>
+                    <button class="btn btn-outline" onclick="document.getElementById('orderDetails').classList.add('hidden')">
+                        <i class="fas fa-times"></i> Close
+                    </button>
+                </div>
+            `;
+            
+            detailsDiv.classList.remove('hidden');
+        }
+
+        function deleteOrder(orderIndex) {
+            if (confirm('Are you sure you want to delete this order?')) {
+                orders.splice(orderIndex, 1);
+                localStorage.setItem('freshCart_orders', JSON.stringify(orders));
+                loadOrders();
+                updateAdminStats();
+                
+                showNotification('Order deleted successfully', 'success');
+            }
+        }
+
+        // ===== CUSTOMERS MANAGEMENT =====
+        function loadCustomers() {
+            const container = document.getElementById('customersTableBody');
+            if (!container) return;
+            
+            if (customers.length === 0) {
+                container.innerHTML = `
+                    <tr>
+                        <td colspan="7" style="text-align: center; padding: 40px;">
+                            <i class="fas fa-users" style="font-size: 3rem; color: #ddd; margin-bottom: 20px;"></i>
+                            <p style="color: var(--text-light);">No customers yet</p>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+            
+            container.innerHTML = customers.map(customer => {
+                const customerOrders = orders.filter(order => order.customer.id === customer.id);
+                const totalSpent = customerOrders.reduce((sum, order) => sum + order.total, 0);
+                
+                return `
+                    <tr>
+                        <td>${customer.id}</td>
+                        <td>
+                            <div style="font-weight: 600;">${customer.name}</div>
+                        </td>
+                        <td>${customer.email}</td>
+                        <td>${customer.phone}</td>
+                        <td>${customerOrders.length}</td>
+                        <td>₹${totalSpent.toFixed(2)}</td>
+                        <td>${new Date(customer.joinDate).toLocaleDateString()}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function updateAdminStats() {
+            document.getElementById('totalOrders').textContent = orders.length;
+            document.getElementById('totalProducts').textContent = products.length;
+            
+            const totalRevenue = orders.reduce((sum, order) => sum + order.total, 0);
+            document.getElementById('totalRevenue').textContent = `₹${totalRevenue.toFixed(2)}`;
+            
+            const pendingOrders = orders.filter(order => order.orderStatus === 'pending').length;
+            document.getElementById('pendingOrders').textContent = pendingOrders;
+        }
+
+        // ===== SERVICE AREAS (PINCODE) & SAVED ADDRESSES =====
+        function loadAllowedPincodes() {
+            const raw = localStorage.getItem('freshCart_allowedPincodes');
+            if (!raw) {
+                // initialize with allowed Nandyal pincodes
+                const defaultP = ['518502','518501'];
+                localStorage.setItem('freshCart_allowedPincodes', JSON.stringify(defaultP));
+                return defaultP;
+            }
+            try { return JSON.parse(raw); } catch (e) { return ['518502','518501']; }
+        }
+
+        function saveAllowedPincodes(list) {
+            localStorage.setItem('freshCart_allowedPincodes', JSON.stringify(list));
+            renderAllowedPincodes();
+        }
+
+        function renderAllowedPincodes() {
+            const list = loadAllowedPincodes();
+            const container = document.getElementById('allowedPincodesList');
+            if (!container) return;
+            if (list.length === 0) {
+                container.innerHTML = '<div style="color:var(--text-light)">No pincodes configured</div>';
+                return;
+            }
+            container.innerHTML = list.map((p,i) => `
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:#fff;border-radius:8px;border:1px solid #eee;">
+                    <div style="font-weight:600">${p}</div>
+                    <div style="display:flex;gap:8px;">
+                        <button class="btn btn-sm btn-outline" onclick="removePincode(${i})">Remove</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function addPincode() {
+            const input = document.getElementById('newPincode');
+            if (!input) return;
+            const pin = (input.value||'').trim();
+            if (!/^[0-9]{6}$/.test(pin)) { showNotification('Enter a valid 6-digit pincode', 'error'); return; }
+            const allowed = loadAllowedPincodes();
+            if (allowed.includes(pin)) { showNotification('Pincode already allowed', 'info'); input.value=''; return; }
+            // Only allow Nandyal pincodes (518501 & 518502)
+            const allowedNandyal = ['518502','518501'];
+            if (!allowedNandyal.includes(pin)) { showNotification('Only Nandyal pincodes (518501, 518502) are supported', 'error'); return; }
+            allowed.push(pin);
+            saveAllowedPincodes(allowed);
+            input.value = '';
+            showNotification('Pincode added', 'success');
+        }
+
+        function removePincode(index) {
+            const allowed = loadAllowedPincodes();
+            if (index < 0 || index >= allowed.length) return;
+            allowed.splice(index,1);
+            saveAllowedPincodes(allowed);
+            showNotification('Pincode removed', 'info');
+        }
+
+        // Saved addresses per customer: stored with key 'freshCart_addresses' as object { customerId: [addresses...] }
+        function loadSavedAddresses() {
+            const container = document.getElementById('savedAddressesList');
+            if (!container) return;
+            container.innerHTML = '';
+            if (!currentUser || currentUser.type !== 'customer') {
+                container.innerHTML = '<div style="color:var(--text-light);">Login as customer to see saved addresses</div>';
+                return;
+            }
+            const raw = localStorage.getItem('freshCart_addresses');
+            if (!raw) { container.innerHTML = '<div style="color:var(--text-light);">No saved addresses</div>'; return; }
+            let data = {};
+            try { data = JSON.parse(raw); } catch(e){ data = {}; }
+            const list = data[currentUser.id] || [];
+            if (!list.length) { container.innerHTML = '<div style="color:var(--text-light);">No saved addresses</div>'; return; }
+            container.innerHTML = list.map(a => `
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:#fff;border-radius:8px;border:1px solid #eee;">
+                    <div style="max-width:70%">
+                        <div style="font-weight:700">${a.label || 'Address'}</div>
+                        <div style="font-size:0.9rem;color:var(--text-light);">${a.doorNumber}, ${a.street}${a.landmark?(', '+a.landmark):''} • ${a.pincode}</div>
+                    </div>
+                    <div style="display:flex;gap:8px;">
+                        <button class="btn btn-sm btn-primary" onclick="useSavedAddress('${a.id}')">Use</button>
+                        <button class="btn btn-sm btn-outline" onclick="editSavedAddress('${a.id}')">Edit</button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteSavedAddress('${a.id}')">Delete</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function saveAddressFromForm() {
+            if (!currentUser || currentUser.type !== 'customer') { showNotification('Login as customer to save addresses', 'error'); return; }
+            const doorNumber = document.getElementById('doorNumber').value.trim();
+            const street = document.getElementById('street').value.trim();
+            const landmark = document.getElementById('landmark').value.trim();
+            const pincode = document.getElementById('pincode').value.trim();
+            const contactPhone = document.getElementById('contactPhone').value.trim();
+            const label = document.getElementById('addressLabel').value.trim() || 'Address';
+            if (!doorNumber || !street || !pincode || !contactPhone) { showNotification('Please fill required fields before saving', 'error'); return; }
+            const allowed = loadAllowedPincodes();
+            if (!allowed.includes(pincode)) { showNotification('Delivery only in Nandyal City (518501, 518502)', 'error'); return; }
+
+            const raw = localStorage.getItem('freshCart_addresses');
+            let data = {};
+            try { data = raw ? JSON.parse(raw) : {}; } catch(e){ data = {}; }
+            data[currentUser.id] = data[currentUser.id] || [];
+            const addr = {
+                id: 'ADDR' + Date.now().toString().slice(-8),
+                label, doorNumber, street, landmark, pincode, contactPhone
+            };
+            data[currentUser.id].push(addr);
+            localStorage.setItem('freshCart_addresses', JSON.stringify(data));
+            loadSavedAddresses();
+            showNotification('Address saved successfully', 'success');
+        }
+
+        function useSavedAddress(addrId) {
+            const raw = localStorage.getItem('freshCart_addresses');
+            if (!raw) return; let data={}; try{ data=JSON.parse(raw);}catch(e){return}
+            const list = data[currentUser.id] || [];
+            const a = list.find(x=>x.id===addrId); if (!a) return;
+            document.getElementById('doorNumber').value = a.doorNumber || '';
+            document.getElementById('street').value = a.street || '';
+            document.getElementById('landmark').value = a.landmark || '';
+            document.getElementById('pincode').value = a.pincode || '';
+            document.getElementById('contactPhone').value = a.contactPhone || '';
+            showNotification('Address applied', 'info');
+        }
+
+        function editSavedAddress(addrId) {
+            const raw = localStorage.getItem('freshCart_addresses');
+            if (!raw) return; let data={}; try{ data=JSON.parse(raw);}catch(e){return}
+            const list = data[currentUser.id] || [];
+            const a = list.find(x=>x.id===addrId); if (!a) return;
+            // populate fields for editing and remove existing entry (user can Save to re-add)
+            document.getElementById('doorNumber').value = a.doorNumber || '';
+            document.getElementById('street').value = a.street || '';
+            document.getElementById('landmark').value = a.landmark || '';
+            document.getElementById('pincode').value = a.pincode || '';
+            document.getElementById('contactPhone').value = a.contactPhone || '';
+            document.getElementById('addressLabel').value = a.label || '';
+            // remove old
+            data[currentUser.id] = list.filter(x=>x.id!==addrId);
+            localStorage.setItem('freshCart_addresses', JSON.stringify(data));
+            loadSavedAddresses();
+            showNotification('Edit the address then click Save', 'info');
+        }
+
+        function deleteSavedAddress(addrId) {
+            const raw = localStorage.getItem('freshCart_addresses');
+            if (!raw) return; let data={}; try{ data=JSON.parse(raw);}catch(e){return}
+            data[currentUser.id] = (data[currentUser.id]||[]).filter(x=>x.id!==addrId);
+            localStorage.setItem('freshCart_addresses', JSON.stringify(data));
+            loadSavedAddresses();
+            showNotification('Address deleted', 'info');
+        }
+
+        // ===== UTILITY FUNCTIONS =====
+        
+        // Create a persistent admin notification for a new order
+        function notifyAdminOrder(order) {
+            // Always update orders list in localStorage
+            localStorage.setItem('freshCart_orders', JSON.stringify(orders));
+            updateAdminStats();
+            loadOrders();
+
+            // If admin is logged in, show a detailed notification
+            if (currentUser && currentUser.type === 'admin') {
+                createAdminNotificationElement(order);
+            }
+        }
+
+        // Show notifications for existing pending/recent orders when admin logs in
+        function showAdminNotifications() {
+            if (!currentUser || currentUser.type !== 'admin') return;
+            // Show only recent (e.g., first 5) pending or recent orders
+            const recent = orders.slice(0, 5);
+            recent.forEach(order => createAdminNotificationElement(order));
+        }
+
+        function createAdminNotificationElement(order) {
+            const container = document.getElementById('notificationContainer');
+            const note = document.createElement('div');
+            note.className = 'notification info';
+
+            // Build concise items list
+            const itemsHtml = order.items.map(i => `${i.name} × ${i.quantity}`).join(', ');
+
+            note.innerHTML = `
+                <div style="display:flex;flex-direction:column;gap:8px;max-width:360px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <div style="font-weight:700;">New Order: ${order.id}</div>
+                        <div style="font-size:0.85rem;color:#fff;opacity:0.9;">${new Date(order.orderDate).toLocaleString()}</div>
+                    </div>
+                    <div style="font-size:0.95rem;">${itemsHtml}</div>
+                    <div style="font-size:0.9rem;color:#fff;opacity:0.95;">Address: ${order.address}</div>
+                    <div style="font-size:0.9rem;color:#fff;opacity:0.95;">Phone: ${order.contactPhone}</div>
+                    <div style="display:flex;gap:8px;margin-top:8px;">
+                        <button class="btn btn-sm btn-primary" style="background:#fff;color:var(--dark-color);" onclick="(function(){showSection('adminPanel');showAdminSection('orders');viewOrderDetails(orders.findIndex(o=>o.id===\'${order.id}\'));document.getElementById('notificationContainer').removeChild(this.closest('.notification'));}).call(this)">View</button>
+                        <button class="btn btn-sm btn-outline" onclick="this.closest('.notification').remove()">Dismiss</button>
+                    </div>
+                </div>
+            `;
+
+            container.appendChild(note);
+            setTimeout(() => note.classList.add('show'), 20);
+            // Auto-remove after 12s
+            setTimeout(() => { if (note.parentNode) note.parentNode.removeChild(note); }, 12000);
+        }
+
+        // ===== CUSTOMER ORDERS FUNCTIONS =====
+        function loadCustomerOrders() {
+            const container = document.getElementById('customerOrdersList');
+            if (!container) return;
+
+            if (!currentUser || currentUser.type !== 'customer') {
+                container.innerHTML = `<div style="padding:20px;background:white;border-radius:var(--radius);box-shadow:var(--shadow);">Please login as a customer to view your orders.</div>`;
+                return;
+            }
+
+            const custOrders = orders.filter(o => o.customer && o.customer.id === currentUser.id);
+
+            if (custOrders.length === 0) {
+                container.innerHTML = `
+                    <div style="padding:30px;text-align:center;background:white;border-radius:var(--radius);box-shadow:var(--shadow);">
+                        <i class="fas fa-box" style="font-size:3rem;color:#ddd;margin-bottom:10px;"></i>
+                        <p style="color:var(--text-light);">You have no orders yet.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = custOrders.map(order => {
+                const items = order.items.map(i => `${i.name} × ${i.quantity}`).join(', ');
+                const eta = getETA(order.deliveryDate);
+                return `
+                    <div style="background:white;padding:18px;border-radius:10px;box-shadow:var(--shadow);margin-bottom:16px;display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+                        <div style="flex:1;min-width:0;">
+                            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+                                <div style="font-weight:700;color:var(--dark-color);">${order.id}</div>
+                                <div style="font-size:0.9rem;color:var(--text-light);">${new Date(order.orderDate).toLocaleString()}</div>
+                            </div>
+                            <div style="margin-top:8px;color:var(--text-light);">${items}</div>
+                            <div style="margin-top:8px;font-weight:600;color:var(--primary-color);">Total: ₹${order.total.toFixed(2)}</div>
+                            <div style="margin-top:8px;">Status: <span class="status-badge status-${order.orderStatus}">${order.orderStatus}</span></div>
+                        </div>
+                        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
+                            <div style="font-size:0.95rem;color:var(--text-light);">ETA: <span id="eta-${order.id}">${eta}</span></div>
+                            <button class="btn btn-primary btn-sm" onclick="viewCustomerOrderDetails('${order.id}')">View</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            // start timers for each order displayed
+            custOrders.forEach(order => startCustomerOrderTimer(order.id));
+        }
+
+        function viewCustomerOrderDetails(orderId) {
+            const order = orders.find(o => o.id === orderId);
+            if (!order) return;
+            const detailsDiv = document.getElementById('customerOrderDetails');
+            const contentDiv = document.getElementById('custOrderDetailsContent');
+            const span = document.getElementById('custDetailOrderId');
+            span.textContent = order.id;
+
+            const itemsHtml = order.items.map(item => `
+                <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f0f0f0;">
+                    <div>
+                        <strong>${item.name}</strong>
+                        <div style="font-size:0.9rem;color:var(--text-light);">${item.quantity}${item.unit} @ ₹${item.price}</div>
+                    </div>
+                    <div style="font-weight:600;">₹${item.total.toFixed(2)}</div>
+                </div>
+            `).join('');
+
+            contentDiv.innerHTML = `
+                <div style="background:white;padding:16px;border-radius:8px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+                        <div>
+                            <div style="font-weight:700;">${order.customer.name}</div>
+                            <div style="font-size:0.9rem;color:var(--text-light);">${order.customer.email} • ${order.contactPhone}</div>
+                            <div style="margin-top:8px;color:var(--text-light);">Address: ${order.address}</div>
+                        </div>
+                        <div style="text-align:right;">
+                            <div style="font-weight:700;color:var(--primary-color);">Total: ₹${order.total.toFixed(2)}</div>
+                            <div style="font-size:0.9rem;color:var(--text-light);">Placed: ${new Date(order.orderDate).toLocaleString()}</div>
+                        </div>
+                    </div>
+
+                    <div style="margin-top:16px;">
+                        <h5>Items</h5>
+                        <div style="background:#fff;padding:12px;border-radius:8px;margin-top:8px;">${itemsHtml}
+                            <div style="display:flex;justify-content:space-between;padding:12px 0;font-weight:700;"> 
+                                <div>Total Amount</div>
+                                <div style="color:var(--primary-color);">₹${order.total.toFixed(2)}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="margin-top:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
+                        <div>
+                            <div>Status: <span class="status-badge status-${order.orderStatus}">${order.orderStatus}</span></div>
+                            <div style="margin-top:8px;">Delivery Instructions: ${order.deliveryInstructions || 'None'}</div>
+                        </div>
+                        <div style="text-align:right;">
+                            <div>Estimated delivery in</div>
+                            <div id="custTimer-${order.id}" style="font-size:1.5rem;font-weight:800;color:var(--primary-color);">${getETA(order.deliveryDate)}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            detailsDiv.classList.remove('hidden');
+            // start timer
+            startCustomerOrderTimer(order.id);
+        }
+
+        function getETA(deliveryDate) {
+            const now = Date.now();
+            const then = new Date(deliveryDate).getTime();
+            let diff = Math.max(0, Math.floor((then - now) / 1000));
+            const minutes = Math.floor(diff / 60);
+            const seconds = diff % 60;
+            return `${minutes}m ${seconds}s`;
+        }
+
+        const _custTimers = window._custTimers = window._custTimers || {};
+        function startCustomerOrderTimer(orderId) {
+            // clear existing
+            if (_custTimers[orderId]) {
+                clearInterval(_custTimers[orderId]);
+                delete _custTimers[orderId];
+            }
+
+            const timerEl = document.getElementById(`custTimer-${orderId}`) || document.getElementById(`eta-${orderId}`);
+            if (!timerEl) return;
+
+            const order = orders.find(o => o.id === orderId);
+            if (!order) return;
+
+            // If order already delivered, show delivered message and do not start a timer
+            if (order.orderStatus === 'delivered') {
+                timerEl.textContent = 'Your item was delivered';
+                timerEl.style.color = 'var(--success-color)';
+                return;
+            }
+
+            _custTimers[orderId] = setInterval(() => {
+                const o = orders.find(o2 => o2.id === orderId);
+                if (!o) { clearInterval(_custTimers[orderId]); delete _custTimers[orderId]; return; }
+                // If admin updated status to delivered elsewhere, stop timer and update UI
+                if (o.orderStatus === 'delivered') {
+                    clearInterval(_custTimers[orderId]);
+                    delete _custTimers[orderId];
+                    if (timerEl) {
+                        timerEl.textContent = 'Your item was delivered';
+                        timerEl.style.color = 'var(--success-color)';
+                    }
+                    return;
+                }
+
+                const now = Date.now();
+                const then = new Date(o.deliveryDate).getTime();
+                let diff = Math.max(0, Math.floor((then - now) / 1000));
+                const minutes = Math.floor(diff / 60);
+                const seconds = diff % 60;
+                const text = diff > 0 ? `${minutes}m ${seconds}s` : 'Arriving Soon';
+                if (timerEl) timerEl.textContent = text;
+
+                if (diff <= 0) {
+                    clearInterval(_custTimers[orderId]);
+                    delete _custTimers[orderId];
+                    // update order status when delivered
+                    if (o && o.orderStatus !== 'delivered') {
+                        o.orderStatus = 'delivered';
+                        localStorage.setItem('freshCart_orders', JSON.stringify(orders));
+                        loadCustomerOrders();
+                        loadOrders();
+                        updateAdminStats();
+                    }
+                }
+            }, 1000);
+        }
+
+        function showNotification(message, type = 'success') {
+            const container = document.getElementById('notificationContainer');
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            
+            let icon = 'fa-check-circle';
+            if (type === 'error') icon = 'fa-exclamation-circle';
+            if (type === 'warning') icon = 'fa-exclamation-triangle';
+            if (type === 'info') icon = 'fa-info-circle';
+            
+            notification.innerHTML = `
+                <i class="fas ${icon}"></i>
+                <span>${message}</span>
+            `;
+            
+            container.appendChild(notification);
+            
+            // Show notification
+            setTimeout(() => {
+                notification.classList.add('show');
+            }, 10);
+            
+            // Hide and remove notification after 4 seconds
+            setTimeout(() => {
+                notification.classList.remove('show');
+                setTimeout(() => {
+                    if (notification.parentNode) {
+                        notification.parentNode.removeChild(notification);
+                    }
+                }, 300);
+            }, 4000);
+        }
+    </script>
+</body>
+</html>
